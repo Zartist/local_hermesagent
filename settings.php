@@ -1,0 +1,73 @@
+<?php
+defined('MOODLE_INTERNAL') || die();
+
+if ($hassiteconfig) {
+    $settings = new admin_settingpage('local_hermesagent_settings', get_string('pluginname', 'local_hermesagent'));
+
+    $bridge_port = get_config('local_hermesagent', 'bridge_port');
+    if (empty($bridge_port)) {
+        $bridge_port = '9118';
+    }
+
+    $is_running = false;
+    $health_data = null;
+    $ch = curl_init("http://127.0.0.1:$bridge_port/health");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 2,
+    ]);
+    $bridge_health = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $is_running = ($bridge_health !== false && $http_code == 200);
+    if ($is_running) {
+        $health_data = json_decode($bridge_health, true);
+    }
+
+    $hermes_home = '/var/www/moodledata/.hermes';
+    $hermes_installed = file_exists("$hermes_home/venv/bin/hermes");
+    $hermes_version = 'Not installed';
+    if ($hermes_installed) {
+        $output = [];
+        exec("$hermes_home/venv/bin/hermes --version 2>&1", $output, $rc);
+        $hermes_version = implode(' ', array_slice($output, 0, 2));
+    }
+
+    // Status block
+    $bridge_html = '<div class="hermes-status-panel">';
+    $bridge_html .= '<table class="generaltable">';
+    $bridge_html .= '<tr><td>ACP Bridge</td><td>' . ($is_running ? '<span class="text-success">Running</span>' : '<span class="text-danger">Stopped</span>') . ' (port ' . $bridge_port . ')</td></tr>';
+    $bridge_html .= '<tr><td>Hermes</td><td>' . htmlspecialchars($hermes_version) . '</td></tr>';
+    if ($health_data && isset($health_data['sessions'])) {
+        $bridge_html .= '<tr><td>Active Sessions</td><td>' . $health_data['sessions'] . '</td></tr>';
+    }
+    $bridge_html .= '</table>';
+    $bridge_html .= '<div class="mt-2">';
+    $bridge_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/settings.php?action=start&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start</a> ';
+    $bridge_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/settings.php?action=stop&sesskey=' . sesskey() . '" class="btn btn-sm btn-danger">Stop</a> ';
+    $bridge_html .= '</div>';
+    $bridge_html .= '</div>';
+
+    $settings->add(new admin_setting_description('local_hermesagent/status', '', $bridge_html));
+
+    $settings->add(new admin_setting_configtext('local_hermesagent/bridge_port',
+        get_string('bridge_port', 'local_hermesagent'),
+        get_string('bridge_port_desc', 'local_hermesagent'),
+        $bridge_port, PARAM_INT));
+
+    // Terminal link
+    $term_link = '<div class="hermes-terminal-link">';
+    $term_link .= '<h4>' . get_string('terminal', 'local_hermesagent') . '</h4>';
+    $term_link .= '<p>Open the live Hermes CLI terminal to configure providers, run commands, and debug.</p>';
+    $term_link .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/terminal.php" class="btn btn-primary">Open Terminal</a>';
+    if (!$hermes_installed) {
+        $term_link .= ' <a href="' . $CFG->wwwroot . '/local/hermesagent/terminal.php" class="btn btn-secondary">Bootstrap Hermes</a>';
+    }
+    $term_link .= '</div>';
+
+    $settings->add(new admin_setting_description('local_hermesagent/terminal_link', '', $term_link));
+
+    $PAGE->requires->css('/local/hermesagent/styles/terminal.css');
+
+    $ADMIN->add('localplugins', $settings);
+}

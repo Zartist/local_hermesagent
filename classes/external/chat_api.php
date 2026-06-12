@@ -1,0 +1,190 @@
+<?php
+namespace local_hermesagent\external;
+
+use external_api;
+use external_function_parameters;
+use external_single_structure;
+use external_multiple_structure;
+use external_value;
+use external_optional_param;
+use context_system;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->libdir . '/externallib.php');
+
+class chat_api extends external_api {
+
+    public static function send_message_parameters() {
+        return new external_function_parameters([
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
+            'message' => new external_value(PARAM_TEXT, 'Message text'),
+        ]);
+    }
+
+    public static function send_message($conversationid, $message) {
+        global $DB, $USER;
+
+        $params = self::validate_parameters(self::send_message_parameters(), [
+            'conversationid' => $conversationid,
+            'message' => $message,
+        ]);
+
+        require_capability('local/hermesagent:use', context_system::instance());
+
+        $rec = new \stdClass();
+        $rec->conversationid = $params['conversationid'];
+        $rec->role = 'user';
+        $rec->content = $params['message'];
+        $rec->timemodified = time();
+        $msgid = $DB->insert_record('local_hermesagent_messages', $rec);
+
+        // Update conversation
+        $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $params['conversationid']]);
+        if ($conv) {
+            $conv->timemodified = time();
+            if ($conv->name === 'New conversation') {
+                $conv->name = clean_param(substr($params['message'], 0, 60), PARAM_NOTAGS);
+            }
+            $DB->update_record('local_hermesagent_conversations', $conv);
+        }
+
+        return ['messageid' => $msgid, 'conversationid' => $params['conversationid']];
+    }
+
+    public static function send_message_returns() {
+        return new external_single_structure([
+            'messageid' => new external_value(PARAM_INT, 'Message ID'),
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
+        ]);
+    }
+
+    public static function get_history_parameters() {
+        return new external_function_parameters([
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
+        ]);
+    }
+
+    public static function get_history($conversationid) {
+        global $DB;
+
+        $params = self::validate_parameters(self::get_history_parameters(), [
+            'conversationid' => $conversationid,
+        ]);
+
+        require_capability('local/hermesagent:use', context_system::instance());
+
+        $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $params['conversationid']], 'id ASC');
+
+        $result = [];
+        foreach ($messages as $msg) {
+            $result[] = [
+                'id' => $msg->id,
+                'role' => $msg->role,
+                'content' => $msg->content,
+                'timemodified' => $msg->timemodified,
+            ];
+        }
+
+        return ['messages' => $result];
+    }
+
+    public static function get_history_returns() {
+        return new external_single_structure([
+            'messages' => new external_multiple_structure(new external_single_structure([
+                'id' => new external_value(PARAM_INT, 'Message ID'),
+                'role' => new external_value(PARAM_ALPHA, 'Role: user, assistant, tool'),
+                'content' => new external_value(PARAM_TEXT, 'Message content'),
+                'timemodified' => new external_value(PARAM_INT, 'Timestamp'),
+            ])),
+        ]);
+    }
+
+    public static function tool_response_parameters() {
+        return new external_function_parameters([
+            'messageid' => new external_value(PARAM_INT, 'Message ID'),
+            'approved' => new external_value(PARAM_BOOL, 'Whether tool was approved'),
+        ]);
+    }
+
+    public static function tool_response($messageid, $approved) {
+        self::validate_parameters(self::tool_response_parameters(), [
+            'messageid' => $messageid,
+            'approved' => $approved,
+        ]);
+
+        require_capability('local/hermesagent:approve_tools', context_system::instance());
+
+        return ['status' => 'ok', 'approved' => (bool)$approved];
+    }
+
+    public static function tool_response_returns() {
+        return new external_single_structure([
+            'status' => new external_value(PARAM_ALPHA, 'Status'),
+            'approved' => new external_value(PARAM_BOOL, 'Approved'),
+        ]);
+    }
+
+    public static function get_conversations_parameters() {
+        return new external_function_parameters([]);
+    }
+
+    public static function get_conversations() {
+        global $DB, $USER;
+
+        require_capability('local/hermesagent:use', context_system::instance());
+
+        $conversations = $DB->get_records('local_hermesagent_conversations', ['usermodified' => $USER->id], 'timemodified DESC');
+
+        $result = [];
+        foreach ($conversations as $conv) {
+            $result[] = [
+                'id' => $conv->id,
+                'name' => $conv->name,
+                'timemodified' => $conv->timemodified,
+            ];
+        }
+
+        return ['conversations' => $result];
+    }
+
+    public static function get_conversations_returns() {
+        return new external_single_structure([
+            'conversations' => new external_multiple_structure(new external_single_structure([
+                'id' => new external_value(PARAM_INT, 'Conversation ID'),
+                'name' => new external_value(PARAM_TEXT, 'Conversation name'),
+                'timemodified' => new external_value(PARAM_INT, 'Timestamp'),
+            ])),
+        ]);
+    }
+
+    public static function delete_conversation_parameters() {
+        return new external_function_parameters([
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
+        ]);
+    }
+
+    public static function delete_conversation($conversationid) {
+        global $DB, $USER;
+
+        $params = self::validate_parameters(self::delete_conversation_parameters(), [
+            'conversationid' => $conversationid,
+        ]);
+
+        require_capability('local/hermesagent:use', context_system::instance());
+
+        $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $params['conversationid'], 'usermodified' => $USER->id]);
+        if ($conv) {
+            $DB->delete_records('local_hermesagent_messages', ['conversationid' => $params['conversationid']]);
+            $DB->delete_records('local_hermesagent_conversations', ['id' => $params['conversationid']]);
+        }
+
+        return ['deleted' => true];
+    }
+
+    public static function delete_conversation_returns() {
+        return new external_single_structure([
+            'deleted' => new external_value(PARAM_BOOL, 'Deleted'),
+        ]);
+    }
+}
