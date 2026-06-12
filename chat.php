@@ -32,6 +32,7 @@ $chat_css = '
     .hermes-chat-container {
         display: flex;
         min-height: calc(100vh - 200px);
+        height: calc(100vh - 200px);
     }
     .hermes-sidebar {
         width: 250px;
@@ -78,8 +79,29 @@ $chat_css = '
     .hermes-message {
         display: flex;
         gap: 0.5rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
         align-items: flex-start;
+    }
+    .hermes-content {
+        word-wrap: break-word;
+        white-space: pre-wrap;
+    }
+    .hermes-content pre {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 0.5rem;
+        border-radius: 4px;
+        overflow-x: auto;
+        white-space: pre;
+    }
+    .hermes-content code {
+        font-family: \'Consolas\', \'Monaco\', monospace;
+        font-size: 0.9em;
+    }
+    .hermes-content :not(pre) > code {
+        background: rgba(0,0,0,0.08);
+        padding: 2px 4px;
+        border-radius: 3px;
     }
     .hermes-message.user-message {
         flex-direction: row-reverse;
@@ -139,6 +161,7 @@ $chat_css = '
     .hermes-input-area {
         border-top: 1px solid #dee2e6;
         padding: 1rem;
+        flex-shrink: 0;
     }
     .hermes-input-container {
         display: flex;
@@ -220,7 +243,8 @@ $conversations = $DB->get_records('local_hermesagent_conversations', ['usermodif
 // Create new conversation if needed
 $current_id = $conversationid;
 $newly_created = false;
-if ($action == 'new' || ($current_id == 0 && !empty($conversations))) {
+if ($action == 'new') {
+    // Explicitly requested new conversation
     $rec = new stdClass();
     $rec->name = get_string('newconversation', 'local_hermesagent');
     $rec->usermodified = $USER->id;
@@ -230,7 +254,12 @@ if ($action == 'new' || ($current_id == 0 && !empty($conversations))) {
     $newly_created = true;
 } else if ($current_id > 0) {
     $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $current_id], '*', MUST_EXIST);
-} else if (empty($conversations)) {
+} else if (!empty($conversations)) {
+    // No conversationid in URL - default to most recent conversation
+    $most_recent = reset($conversations);
+    $current_id = $most_recent->id;
+} else {
+    // No existing conversations - create first one
     $rec = new stdClass();
     $rec->name = get_string('newconversation', 'local_hermesagent');
     $rec->usermodified = $USER->id;

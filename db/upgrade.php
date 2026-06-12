@@ -56,5 +56,14 @@ function xmldb_local_hermesagent_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026061204, 'local', 'hermesagent');
     }
 
+    
+    if ($oldversion < 2026061303) {
+        // Flush caches to pick up new web services (rename_conversation, save_assistant_response)
+        // Moodle 5.x rebuilds web service cache on upgrade_plugin_savepoint + purge
+        purge_all_caches();
+        
+        upgrade_plugin_savepoint(true, 2026061303, 'local', 'hermesagent');
+    }
+
     return true;
 }

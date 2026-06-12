@@ -101,8 +101,11 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
                 }]);
 
                 renamePromises[0].then(function() {
-                    $btn.siblings('.hermes-conv-name').text($.trim(newName));
+                    // Update the conversation name in the list item
+                    var $li = $btn.closest('.hermes-conv-item');
+                    $li.find('.hermes-conv-name').text($.trim(newName));
                     $btn.data('conv-name', $.trim(newName));
+                    $li.data('conv-name', $.trim(newName));
                 }).catch(function(ex) {
                     console.error('[Hermes] rename failed:', ex);
                 });
@@ -246,11 +249,27 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             if (eventSource.url) {
                 console.error('URL:', eventSource.url);
             }
-            messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
             eventSource.close();
             isStreaming = false;
             $('#hermes-send-btn').prop('disabled', false);
             $('#' + currentSpinnerId).remove();
+
+            // Save partial content if we have any
+            var partialContent = messageEl.text();
+            if (partialContent) {
+                var savePromises = ajax.call([{
+                    methodname: 'local_hermesagent_save_assistant_response',
+                    args: {
+                        conversationid: conversationid,
+                        content: partialContent
+                    }
+                }]);
+                savePromises[0].catch(function(ex) {
+                    console.error('[Hermes] Failed to save partial response:', ex);
+                });
+            }
+
+            messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
         });
 
         eventSource.addEventListener('done', function(e) {
@@ -259,6 +278,19 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             $('#hermes-send-btn').prop('disabled', false);
             $('#' + currentSpinnerId).remove();
             messageEl.removeClass('hermes-streaming');
+
+            // Save the final assistant response to the database
+            var finalContent = messageEl.text();
+            var savePromises = ajax.call([{
+                methodname: 'local_hermesagent_save_assistant_response',
+                args: {
+                    conversationid: conversationid,
+                    content: finalContent
+                }
+            }]);
+            savePromises[0].catch(function(ex) {
+                console.error('[Hermes] Failed to save assistant response:', ex);
+            });
         });
         }).catch(function(ex) {
             console.error('[Hermes] streamResponse error:', ex);
@@ -355,9 +387,13 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
     /**
      * Scroll chat to bottom
      */
-    var scrollToEnd = function() {
-        var chatArea = document.getElementById('hermes-chat-area');
-        chatArea.scrollTop = chatArea.scrollHeight;
+    var shouldAutoScroll = true;
+
+    var scrollToEnd = function(force) {
+        if (force || shouldAutoScroll) {
+            var chatArea = document.getElementById('hermes-chat-area');
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
     };
 
     return {

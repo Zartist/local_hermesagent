@@ -35,4 +35,4 @@ $string['approve_tools'] = 'Approve tool execution';
 $string['privacy:metadata'] = 'The Hermes Agent plugin stores chat conversations and learned skills.';
 
 $string['backto'] = 'Back to settings';
-$string['rename', 'local_hermesagent'] = 'Rename';
+$string['rename'] = 'Rename';

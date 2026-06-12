@@ -43,9 +43,17 @@ $functions = [
         'capabilities'  => 'local/hermesagent:use',
     ],
     'local_hermesagent_rename_conversation' => [
-        'classname'     => 'local_hermesagent\\external\\chat_api',
+        'classname'     => 'local_hermesagent\external\chat_api',
         'methodname'    => 'rename_conversation',
         'description'   => 'Rename a conversation',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'local/hermesagent:use',
+    ],
+    'local_hermesagent_save_assistant_response' => [
+        'classname'     => 'local_hermesagent\external\chat_api',
+        'methodname'    => 'save_assistant_response',
+        'description'   => 'Save assistant streaming response to DB',
         'type'          => 'write',
         'ajax'          => true,
         'capabilities'  => 'local/hermesagent:use',

@@ -214,7 +214,7 @@ class chat_api extends external_api {
             throw new \moodle_exception('invalidconversation');
         }
 
-        $conv->name = clean_param(substr($params['name'], 0, 200), PARAM_NOTAGS);
+        $conv->name = clean_param(substr($params['name'], 0, 200), PARAM_TEXT);
         $conv->timemodified = time();
         $DB->update_record('local_hermesagent_conversations', $conv);
 
@@ -226,5 +226,50 @@ class chat_api extends external_api {
             'status' => new external_value(PARAM_ALPHA, 'Status'),
         ]);
     }
+
+
+    public static function save_assistant_response_parameters() {
+        return new external_function_parameters([
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
+            'content' => new external_value(PARAM_TEXT, 'Assistant response content'),
+        ]);
+    }
+
+    public static function save_assistant_response($conversationid, $content) {
+        global $DB, $USER;
+
+        $params = self::validate_parameters(self::save_assistant_response_parameters(), [
+            'conversationid' => $conversationid,
+            'content' => $content,
+        ]);
+
+        require_capability('local/hermesagent:use', context_system::instance());
+
+        // Check conversation exists and belongs to user
+        $conv = $DB->get_record('local_hermesagent_conversations', [
+            'id' => $params['conversationid'],
+            'usermodified' => $USER->id,
+        ], '*');
+
+        if (!$conv) {
+            throw new \moodle_exception('invalidconversation');
+        }
+
+        $rec = new \stdClass();
+        $rec->conversationid = $params['conversationid'];
+        $rec->role = 'assistant';
+        $rec->content = $params['content'];
+        $rec->timemodified = time();
+        $DB->insert_record('local_hermesagent_messages', $rec);
+
+        return ['status' => 'ok'];
+    }
+
+    public static function save_assistant_response_returns() {
+        return new external_single_structure([
+            'status' => new external_value(PARAM_ALPHA, 'Status'),
+        ]);
+    }
+
 
 }
