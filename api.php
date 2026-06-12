@@ -15,12 +15,13 @@ require_capability('local/hermesagent:use', context_system::instance());
 
 $PAGE->set_context(context_system::instance());
 
-// Only allow JSON POST
-if (!isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] !== 'XMLHttpRequest') {
-    send_json_response(['error' => 'Access denied']);
-}
-
+// CSRF check — Moodle sesskey in URL protects SSE stream; only guard JSON POST actions.
 $action = required_param('action', PARAM_ALPHA);
+if ($action !== 'stream') {
+    if (!isset($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] !== 'XMLHttpRequest') {
+        send_json_response(['error' => 'Access denied']);
+    }
+}
 
 switch ($action) {
     case 'send':
@@ -148,14 +149,13 @@ function api_stream_response(): void {
             foreach ($lines as $line) {
                 if (strpos($line, 'data: ') === 0) {
                     $payload = substr($line, 6);
-                    if ($payload === '[DONE]') {
+                    $json = json_decode($payload, true);
+                    if (!$json) continue;
+                    if (isset($json['done']) && $json['done']) {
                         // Finalize
                         flush();
                         return strlen($data);
                     }
-                    
-                    $json = json_decode($payload, true);
-                    if (!$json) continue;
                     
                     if (isset($json['session_id']) && $message_id === null) {
                         // New session
@@ -226,12 +226,11 @@ function api_bridge_status(): void {
         CURLOPT_TIMEOUT => 3,
     ]);
     $resp = curl_exec($ch);
-    if ($resp !== false) {
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    if ($resp !== false && $http_code === 200) {
         $online = true;
-        $bridge_status = 'running';
         local_hermesagent_set_setting('bridge_status', 'running');
-    } else {
-        local_hermesagent_set_setting('bridge_status', 'stopped');
+        $bridge_status = 'running';
     }
     curl_close($ch);
     

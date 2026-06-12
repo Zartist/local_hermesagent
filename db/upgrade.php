@@ -39,5 +39,22 @@ function xmldb_local_hermesagent_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026061200, 'local', 'hermesagent');
     }
 
+    if ($oldversion < 2026061204) {
+        // Purge requirejs cache so our AMD modules are included.
+        // Moodle's requirejs cache is tied to the theme revision and does not
+        // automatically rebuild when a new plugin is installed.
+        $requirejs_dir = $CFG->localcachedir . '/requirejs/';
+        if (is_dir($requirejs_dir)) {
+            $files = glob($requirejs_dir . '*');
+            foreach ($files as $f) {
+                if (is_file($f)) {
+                    unlink($f);
+                }
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026061204, 'local', 'hermesagent');
+    }
+
     return true;
 }

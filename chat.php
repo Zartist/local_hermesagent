@@ -136,9 +136,11 @@ echo html_writer::end_div('hermes-tool-modal');
 echo html_writer::end_div('hermes-main');
 echo html_writer::end_div('hermes-chat-container');
 
-// Pass config to JS
-$PAGE->requires->js_init_call('M.local_hermesagent.set_config', [
-    json_encode([
+// Pass config to JS - stored in a data element for AMD module to pick up
+echo html_writer::start_div('hermes-config-hidden', [
+    'id' => 'hermes-config',
+    'style' => 'display:none;',
+    'data-config' => json_encode([
         'conversationid' => $current_id,
         'userid' => $USER->id,
         'token' => sesskey(),
@@ -146,5 +148,6 @@ $PAGE->requires->js_init_call('M.local_hermesagent.set_config', [
         'sesskey' => sesskey(),
     ]),
 ]);
+echo html_writer::end_div();
 
 echo $OUTPUT->footer();
