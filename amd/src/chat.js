@@ -6,7 +6,7 @@
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
+define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
     var config = {};
     var currentMessage = null;
     var isStreaming = false;
@@ -19,7 +19,14 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
             // Read config from data attribute on the page
             var $configEl = $('#hermes-config');
             if ($configEl.length) {
-                config = $.parseJSON($configEl.data('config'));
+                // Use raw attribute and decode HTML entities (html_writer escapes JSON)
+                try {
+                    var rawConfig = $configEl[0].getAttribute('data-config');
+                    var decodedConfig = $('<textarea>').html(rawConfig).text();
+                    config = $.parseJSON(decodedConfig);
+                } catch(e) {
+                    console.error('[Hermes] Failed to parse config:', e);
+                }
             }
             console.log('[Hermes] Config loaded:', config);
             setupEventListeners();
@@ -77,15 +84,18 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
      * Load conversation history
      */
     var loadHistory = function() {
-        var promises = Ajax([{
+        var promises = ajax.call([{
             methodname: 'local_hermesagent_get_history',
             args: { conversationid: config.conversationid }
         }]);
 
-        $.when.apply($, promises).done(function(response) {
-            var messages = response[0] ? response[0].messages : [];
+        promises[0].then(function(data) {
+            var messages = data.messages || [];
             renderMessages(messages);
             scrollToEnd();
+        }).catch(function(ex) {
+            console.error('[Hermes] loadHistory failed:', ex);
+            $('#hermes-chat-area').append('<div class="hermes-error">Failed to load history.</div>');
         });
     };
 
@@ -148,8 +158,8 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
         // Get the message that was stored
         var message = $('#hermes-message-input').data('lastmessage') || '';
 
-        // First save the user message
-        var sendPromises = Ajax([{
+        // First save the user message via web service
+        var sendPromises = ajax.call([{
             methodname: 'local_hermesagent_send_message',
             args: {
                 conversationid: conversationid,
@@ -157,13 +167,15 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
             }
         }]);
 
-        // Then connect to SSE stream
-        var eventSource = new EventSource(
-            M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream&conversationid=' + conversationid + '&sesskey=' + config.sesskey
-        );
+        sendPromises[0].then(function() {
+            console.log('[Hermes] User message saved, starting stream');
+            
+            var eventSource = new EventSource(
+                M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream&conversationid=' + conversationid + '&sesskey=' + config.sesskey
+            );
 
-        console.log('[Hermes] Stream URL:', eventSource.url);
-        console.log('[Hermes] Sending message:', message.substring(0, 50));
+            console.log('[Hermes] Stream URL:', eventSource.url);
+            console.log('[Hermes] Sending message:', message.substring(0, 50));
 
         // Handle the 'message' event from api.php SSE stream
         eventSource.addEventListener('message', function(e) {
@@ -207,6 +219,12 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
             $('#hermes-spinner').remove();
             messageEl.removeClass('hermes-streaming');
         });
+        }).catch(function(ex) {
+            console.error('[Hermes] streamResponse error:', ex);
+            isStreaming = false;
+            $('#hermes-send-btn').prop('disabled', false);
+            $('#hermes-spinner').remove();
+        });
     };
 
     /**
@@ -228,7 +246,7 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
     var handleToolResponse = function(approved) {
         if (!currentMessage) return;
 
-        var promises = Ajax([{
+        var promises = ajax.call([{
             methodname: 'local_hermesagent_tool_response',
             args: {
                 messageid: currentMessage.id,
@@ -236,10 +254,12 @@ define(['jquery', 'core/ajax', 'core/str'], function($, Ajax, Str) {
             }
         }]);
 
-        $.when.apply($, promises).done(function() {
+        promises[0].then(function() {
             $('#hermes-tool-modal').hide();
             currentMessage = null;
             scrollToEnd();
+        }).catch(function(ex) {
+            console.error('[Hermes] handleToolResponse failed:', ex);
         });
     };
 
