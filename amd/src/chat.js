@@ -465,7 +465,6 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             mathjaxurl: mathjaxUrl,
             mathjaxconfig: JSON.stringify({
                 tex: {
-                    packages: {'[+]': 'ams'},
                     inlineMath: [['$', '$'], ['\\(', '\\)']],
                     displayMath: [['$$', '$$'], ['\\[', '\\]']]
                 }
@@ -503,7 +502,72 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
      * Render markdown to HTML and typeset math
      * Uses marked.js for GFM rendering + MathJax v4 for math
      */
-    var renderMarkdown = function(text) {
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * LLM outputs: \[ equation \] or [ equation ]
+     * Uses string operations (not regex) to avoid RequireJS backslash escaping.
+     */
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
+     */
+    var convertDisplayMathBrackets = function(text) {
+        var BS = String.fromCharCode(92);  // backslash
+        var OPEN = BS + '[';
+        var CLOSE = BS + ']';
+        
+        var result = '';
+        var searchStart = 0;
+        
+        while (searchStart < text.length) {
+            var openIdx = text.indexOf(OPEN, searchStart);
+            if (openIdx === -1) {
+                result += text.substring(searchStart);
+                break;
+            }
+            
+            // Add text before the delimiter
+            result += text.substring(searchStart, openIdx);
+            
+            // Find closing delimiter
+            var closeIdx = text.indexOf(CLOSE, openIdx + OPEN.length);
+            if (closeIdx === -1) {
+                // No closing delimiter found, keep original
+                result += text.substring(openIdx);
+                break;
+            }
+            
+            // Extract equation content
+            var eq = text.substring(openIdx + OPEN.length, closeIdx).trim();
+            
+            // Check if content looks like math
+            var isMath = eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 || 
+                         eq.indexOf('-') !== -1 || eq.indexOf('^') !== -1 ||
+                         eq.indexOf('{') !== -1 || eq.indexOf('}') !== -1 ||
+                         eq.indexOf(BS) !== -1 || eq.indexOf('sin') !== -1 ||
+                         eq.indexOf('cos') !== -1 || eq.indexOf('log') !== -1 ||
+                         eq.indexOf('int') !== -1 || eq.indexOf('sum') !== -1 ||
+                         eq.indexOf('lim') !== -1;
+            
+            if (isMath) {
+                result += '$$' + eq + '$$';
+            } else {
+                // Not math, keep original
+                result += text.substring(openIdx, closeIdx + CLOSE.length);
+            }
+            
+            searchStart = closeIdx + CLOSE.length;
+        }
+        
+        return result;
+    };
+    
+    
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * Uses string operations (not regex) to avoid RequireJS backslash escaping.
+     * Handles: \[ equation \] → $$ equation $$
+     */var renderMarkdown = function(text) {
         if (!text) return Promise.resolve('');
         text = text.trim();
         if (!text) return Promise.resolve('');
@@ -514,8 +578,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         // Sanitize dangerous HTML tags but preserve safe ones
         text = text.replace(/<\s*(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
         text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*\s*>/gi, '');
+
+        text = convertDisplayMathBrackets(text);
         
-        return loadMarked().then(function(m) {
+                return loadMarked().then(function(m) {
             var html = m.parse(text);
             return html;
         }).catch(function(err) {
