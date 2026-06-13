@@ -232,7 +232,7 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
                     // Track the raw markdown for saving later
                     rawMarkdown = data.full;
                     // Render markdown to HTML for display
-                    messageEl.html(renderMarkdown(data.full));
+                    setMarkdownContent(messageEl, data.full);
                     scrollToEnd();
                 }
             } catch(ex) {
@@ -346,8 +346,10 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
      * Render messages to UI
      */
     var renderMessages = function(messages) {
-        $('#hermes-chat-area').empty();
+        var chatArea = $('#hermes-chat-area');
+        chatArea.empty();
 
+        var promises = [];
         messages.forEach(function(msg) {
             if (!msg || !msg.content || !msg.content.trim()) {
                 return; // Skip empty messages
@@ -358,104 +360,156 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
                 html += '<div class="hermes-bubble hermes-user-bubble">';
                 html += '<div class="hermes-content">' + escapeHtml(msg.content.trim()) + '</div>';
                 html += '</div></div>';
-                $('#hermes-chat-area').append(html);
+                chatArea.append(html);
             } else if (msg.role === 'assistant') {
                 var html = '<div class="hermes-message hermes-assistant-message">';
                 html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
                 html += '<div class="hermes-bubble hermes-assistant-bubble">';
-                html += '<div class="hermes-content">' + renderMarkdown(msg.content.trim()) + '</div>';
+                html += '<div class="hermes-content"></div>';
                 html += '</div></div>';
-                $('#hermes-chat-area').append(html);
+                chatArea.append(html);
+                
+                // Render markdown + math asynchronously
+                var $content = chatArea.find('.hermes-content').last();
+                var promise = renderMarkdown(msg.content.trim()).then(function(mdHtml) {
+                    $content.html(mdHtml);
+                    typesetMath($content[0]);
+                });
+                promises.push(promise);
             }
         });
+        
+        // Return promise that resolves when all messages are rendered
+        return Promise.all(promises);
     };
 
     /**
      * Simple markdown renderer
      */
     /**
-     * Convert markdown syntax to HTML.
-     * Input must be HTML-escaped (except for markdown syntax chars).
+     * Marked.js - loaded from CDN on first use
+     * NOTE: Moodle sets define.amd=true globally, so marked UMD tries to register
+     * as an AMD module instead of setting window.marked. We must temporarily
+     * hide define.amd while loading the script.
      */
-    var convertInlineMd = function(s) {
-        // Headers (must be at start of line)
-        s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-        s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-        s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-        
-        // Bold
-        s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
-        
-        // Italic (after bold, so **bold** is not affected)
-        s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        s = s.replace(/(?<!\w)_(.+?)_(?!\w)/g, '<em>$1</em>');
-        
-        // Links [text](url)
-        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        
-        // Unordered lists (- item or * item at start of line)
-        s = s.replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>');
-        s = s.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
-        
-        // Horizontal rules
-        s = s.replace(/^---+$/gm, '<hr>');
-        
-        // Newlines to <br>
-        s = s.replace(/\n\n/g, '<br><br>');
-        s = s.replace(/\n/g, '<br>');
-        
-        return s;
-    };
+    var markedInstance = null;
+    var markedPromise = null;
     
-    var renderMarkdown = function(text) {
-        if (!text) return '';
-        text = text.trim();
-        if (!text) return '';
+    var loadMarked = function() {
+        if (markedInstance) return Promise.resolve(markedInstance);
+        if (markedPromise) return markedPromise;
         
-        // Split text by fenced code blocks (```), process each segment
-        var fencedRe = /```(\w*)\n?([\s\S]*?)```/g;
-        var segments = [];
-        var lastIndex = 0;
-        var m;
-        while ((m = fencedRe.exec(text)) !== null) {
-            if (m.index > lastIndex) {
-                segments.push(processInlineSegments(text.substring(lastIndex, m.index)));
+        markedPromise = new Promise(function(resolve, reject) {
+            // Temporarily hide define.amd so marked falls through to global export
+            var savedAmd = typeof define !== 'undefined' && define.amd;
+            if (typeof define !== 'undefined') {
+                // @ts-ignore
+                define.amd = undefined;
             }
-            var lang = m[1] || 'text';
-            var code = m[2].trim();
-            segments.push('<pre><code class="language-' + escapeHtml(lang) + '">' + escapeHtml(code) + '</code></pre>');
-            lastIndex = m.index + m[0].length;
-        }
-        if (lastIndex < text.length) {
-            segments.push(processInlineSegments(text.substring(lastIndex)));
-        }
+            
+            var script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js';
+            script.onload = function() {
+                // Restore define.amd
+                if (typeof define !== 'undefined' && savedAmd !== undefined) {
+                    define.amd = savedAmd;
+                }
+                
+                if (window.marked) {
+                    markedInstance = window.marked;
+                    // marked v15 uses setOptions()
+                    markedInstance.setOptions({
+                        gfm: true,
+                        breaks: false,
+                        headerIds: false,
+                        mangle: false
+                    });
+                    resolve(markedInstance);
+                } else {
+                    reject(new Error('marked loaded but window.marked is undefined'));
+                }
+            };
+            script.onerror = function() {
+                // Restore define.amd even on error
+                if (typeof define !== 'undefined' && savedAmd !== undefined) {
+                    define.amd = savedAmd;
+                }
+                reject(new Error('Failed to load marked.js from CDN'));
+            };
+            document.head.appendChild(script);
+        });
         
-        return segments.join('');
+        return markedPromise;
     };
     
     /**
-     * Process a text segment that may contain inline code (`) and markdown.
-     * Splits by inline code first, then converts markdown on the non-code parts.
+     * Typeset MathJax for an element
      */
-    var processInlineSegments = function(text) {
-        var inlineRe = /`([^`]+)`/g;
-        var parts = [];
-        var lastIdx = 0;
-        var m;
-        while ((m = inlineRe.exec(text)) !== null) {
-            if (m.index > lastIdx) {
-                var before = escapeHtml(text.substring(lastIdx, m.index));
-                parts.push(convertInlineMd(before));
-            }
-            parts.push('<code>' + escapeHtml(m[1]) + '</code>');
-            lastIdx = m.index + m[0].length;
+    var typesetMath = function(element) {
+        if (!window.MathJax) {
+            // MathJax not loaded on this page — load it from Moodle's CDN URL
+            var mathjaxUrl = M.cfg.wwwroot + '/filter/mathjaxloader/web/lib/MathJax.js?config=Moodle_html';
+            if (!mathjaxUrl) return;
+            
+            // Load MathJax v4 from the configured CDN
+            var config = {
+                loader: { load: ['ui/safe', '[tex]/ams'] },
+                tex: {
+                    packages: {'[+]': 'ams'},
+                    inlineMath: [['$', '$'], ['\\(', '\\)']],
+                    displayMath: [['$$', '$$'], ['\\[', '\\]']]
+                },
+                startup: { typeset: false }
+            };
+            window.MathJax = config;
+            
+            var script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/mathjax@4.0.0/tex-mml-chtml.js';
+            script.async = true;
+            document.head.appendChild(script);
         }
-        if (lastIdx < text.length) {
-            var remaining = escapeHtml(text.substring(lastIdx));
-            parts.push(convertInlineMd(remaining));
+        
+        // Queue typesetting
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            window.MathJax.typesetPromise([element]).catch(function(err) {
+                console.log('[Hermes] MathJax error:', err);
+            });
         }
-        return parts.join('');
+    };
+    
+    /**
+     * Render markdown to HTML and typeset math
+     * Uses marked.js for GFM rendering + MathJax v4 for math
+     */
+    var renderMarkdown = function(text) {
+        if (!text) return Promise.resolve('');
+        text = text.trim();
+        if (!text) return Promise.resolve('');
+        
+        // Normalize line endings
+        text = text.replace(/\r\n/g, '\n');
+        
+        // Sanitize dangerous HTML tags but preserve safe ones
+        text = text.replace(/<\s*(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
+        text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*\s*>/gi, '');
+        
+        return loadMarked().then(function(m) {
+            var html = m.parse(text);
+            return html;
+        }).catch(function(err) {
+            console.error('[Hermes] Failed to parse markdown:', err);
+            return Promise.resolve(escapeHtml(text));
+        });
+    };
+    
+    /**
+     * Set content of an element with markdown + math rendering
+     */
+    var setMarkdownContent = function(element, text) {
+        renderMarkdown(text).then(function(html) {
+            element.html(html);
+            typesetMath(element[0]);
+        });
     };
 
     /**
