@@ -371,8 +371,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 
                 // Render markdown + math asynchronously
                 var $content = chatArea.find('.hermes-content').last();
+                console.log('[Hermes] renderMessages: rendering assistant msg');
                 var promise = renderMarkdown(msg.content.trim()).then(function(mdHtml) {
                     $content.html(mdHtml);
+                    console.log('[Hermes] renderMessages: calling typesetMath');
                     typesetMath($content[0]);
                 });
                 promises.push(promise);
@@ -478,23 +480,44 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     /**
      * Typeset math in an element using Moodle's MathJax loader
      */
-    var typesetMath = function(element) {
+        var typesetMath = function(element) {
+        console.log('[Hermes] >>> typesetMath START');
         configureMathJax();
         
-        // Use Moodle's loadMathJax promise, then chain typesetPromise
-        mathjaxLoader.loadMathJax().then(function() {
-            if (window.MathJax && window.MathJax.typesetPromise) {
-                // Chain through startup.promise like Moodle does
-                window.MathJax.startup.promise = window.MathJax.startup.promise
-                    .then(function() {
-                        return window.MathJax.typesetPromise([element]);
-                    })
-                    .catch(function(e) {
-                        console.error('[Hermes] MathJax typeset error:', e);
-                    });
+        var loadPromise = mathjaxLoader.loadMathJax();
+        
+        loadPromise.then(function() {
+            console.log('[Hermes] >>> loadMathJax RESOLVED');
+            console.log('[Hermes] >>> window.MathJax:', window.MathJax ? 'exists' : 'undefined');
+            console.log('[Hermes] >>> typesetPromise:', window.MathJax ? typeof window.MathJax.typesetPromise : 'N/A');
+            
+            // Wait for startup.promise to resolve first
+            // On revisit, MathJax may be mid-initialization
+            if (window.MathJax && window.MathJax.startup) {
+                console.log('[Hermes] >>> waiting for startup.promise');
+                return window.MathJax.startup.promise.then(function() {
+                    console.log('[Hermes] >>> startup.promise RESOLVED');
+                    console.log('[Hermes] >>> typesetPromise after startup:', typeof window.MathJax.typesetPromise);
+                    
+                    if (window.MathJax.typesetPromise) {
+                        console.log('[Hermes] >>> calling typesetPromise');
+                        return window.MathJax.typesetPromise([element]).then(function(r) {
+                            console.log('[Hermes] >>> typesetPromise DONE, results:', r);
+                        });
+                    } else {
+                        console.error('[Hermes] >>> typesetPromise STILL NOT AVAILABLE after startup.promise');
+                        console.log('[Hermes] >>> MathJax object keys:', Object.keys(window.MathJax));
+                    }
+                });
+            } else if (window.MathJax && window.MathJax.typesetPromise) {
+                // Startup promise doesn't exist but typesetPromise does (edge case)
+                console.log('[Hermes] >>> calling typesetPromise directly');
+                return window.MathJax.typesetPromise([element]);
+            } else {
+                console.error('[Hermes] >>> neither startup.promise nor typesetPromise available');
             }
         }).catch(function(e) {
-            console.error('[Hermes] MathJax load error:', e);
+            console.error('[Hermes] loadMathJax error:', e);
         });
     };
     
@@ -526,115 +549,98 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
      * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
      * Handles BOTH \[ equation \] AND [ equation ] at start of line.
      */
-    var convertDisplayMathBrackets = function(text) {
-        var BS = String.fromCharCode(92);  // backslash
-        var OPEN_BS = BS + '[';  // \[
-        var CLOSE_BS = BS + ']'; // \]
-        
+        var BS = String.fromCharCode(92);
+    var MATH_OPEN_PLACEHOLDER = String.fromCharCode(57344);
+    var MATH_CLOSE_PLACEHOLDER = String.fromCharCode(57345);
+
+    var protectMathDelimiters = function(text) {
         var result = '';
         var searchStart = 0;
-        
+        var OPEN = BS + '[';
+        var CLOSE = BS + ']';
         while (searchStart < text.length) {
-            var openIdx = text.indexOf(OPEN_BS, searchStart);
-            
+            var openIdx = text.indexOf(OPEN, searchStart);
             if (openIdx === -1) {
-                // No more \[ found, append rest
                 result += text.substring(searchStart);
                 break;
             }
-            
-            result += text.substring(searchStart, openIdx);
-            
-            var contentStart = openIdx + 2;  // skip \[
-            var closeIdx = text.indexOf(CLOSE_BS, contentStart);
-            
+            var closeIdx = text.indexOf(CLOSE, openIdx + OPEN.length);
             if (closeIdx === -1) {
-                result += text.substring(openIdx);
-                break;
+                result += text.substring(searchStart, openIdx) + MATH_OPEN_PLACEHOLDER;
+                searchStart = openIdx + OPEN.length;
+                continue;
             }
-            
-            // Don't cross newlines
-            var content = text.substring(contentStart, closeIdx);
-            if (content.indexOf('\n') !== -1) {
-                result += text.substring(openIdx);
-                break;
+            var content = text.substring(openIdx + OPEN.length, closeIdx);
+            var eq = content.trim();
+            if (isMathContent(eq)) {
+                result += text.substring(searchStart, openIdx) + MATH_OPEN_PLACEHOLDER + content + MATH_CLOSE_PLACEHOLDER;
+            } else {
+                result += text.substring(searchStart, openIdx + OPEN.length);
             }
-            
-            result += processBracketBlock(text, contentStart, closeIdx + 2);
-            searchStart = closeIdx + 2;
+            searchStart = closeIdx + CLOSE.length;
         }
-        
-        // Now handle bare [ equation ] at start of line
-        // Split by lines, process each line
-        result = processBareBrackets(result);
-        
+        result += text.substring(searchStart);
+        result = protectBareBrackets(result);
+        result = convertLegacyDollars(result);
         return result;
     };
-    
-    /**
-     * Process a bracket block: extract equation, check if math, return result
-     */
-    var processBracketBlock = function(text, contentStart, searchStart) {
-        var eq = text.substring(contentStart, searchStart - 2).trim();
-        return isMathContent(eq) ? '$$' + eq + '$$' : text.substring(contentStart - 2, searchStart);
-    };
-    
-    /**
-     * Process bare [ equation ] at start of line
-     */
-    var processBareBrackets = function(text) {
+
+    var protectBareBrackets = function(text) {
         var lineBreak = text.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
-        var lines = text.split(lineBreak);
+        var parts = text.split(lineBreak);
         var result = [];
-        
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            var processed = convertLineBareBrackets(line);
-            result.push(processed);
+        for (var i = 0; i < parts.length; i++) {
+            result.push(protectLineBareBrackets(parts[i]));
         }
-        
         return result.join(lineBreak);
     };
-    
-    /**
-     * Convert bare [ equation ] at start of a single line
-     */
-    var convertLineBareBrackets = function(line) {
-        var openIdx = line.indexOf('[');
-        if (openIdx === -1) return line;
-        
-        // Must be at start of line (after optional whitespace)
-        var beforeOpen = line.substring(0, openIdx);
-        if (beforeOpen.trim() !== '') return line;
-        
-        var closeIdx = line.indexOf(']', openIdx + 1);
-        if (closeIdx === -1) return line;
-        
-        // Check for markdown link [text](url)
-        if (closeIdx + 1 < line.length && line[closeIdx + 1] === '(') {
-            return line;
-        }
-        
-        var eq = line.substring(openIdx + 1, closeIdx).trim();
-        
+
+    var protectLineBareBrackets = function(line) {
+        var oi = line.indexOf('[');
+        if (oi === -1) return line;
+        var before = line.substring(0, oi);
+        if (before.trim() !== '') return line;
+        var ci = line.indexOf(']', oi + 1);
+        if (ci === -1) return line;
+        if (ci + 1 < line.length && line[ci + 1] === '(') return line;
+        var eq = line.substring(oi + 1, ci).trim();
         if (isMathContent(eq)) {
-            return beforeOpen + '$$' + eq + '$$' + line.substring(closeIdx + 1);
+            return before + MATH_OPEN_PLACEHOLDER + eq + MATH_CLOSE_PLACEHOLDER + line.substring(ci + 1);
         }
-        
         return line;
     };
-    
-    /**
-     * Check if content looks like math
-     */
+
+    var convertLegacyDollars = function(text) {
+        var result = '';
+        var searchStart = 0;
+        while (searchStart < text.length) {
+            var oi = text.indexOf('$$', searchStart);
+            if (oi === -1) { result += text.substring(searchStart); break; }
+            var ci = text.indexOf('$$', oi + 2);
+            if (ci === -1) { result += text.substring(oi); break; }
+            var eq = text.substring(oi + 2, ci).trim();
+            if (isMathContent(eq)) {
+                result += text.substring(searchStart, oi) + MATH_OPEN_PLACEHOLDER + eq + MATH_CLOSE_PLACEHOLDER;
+            } else {
+                result += text.substring(oi, ci + 2);
+            }
+            searchStart = ci + 2;
+        }
+        return result;
+    };
+
+    var unescapeMathDelimiters = function(html) {
+        return html.split(MATH_OPEN_PLACEHOLDER).join(BS + '[')
+                   .split(MATH_CLOSE_PLACEHOLDER).join(BS + ']');
+    };
+
     var isMathContent = function(eq) {
         if (!eq) return false;
-        var BS = String.fromCharCode(92);
-        // Check for math operators and LaTeX patterns
-        return eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 || 
+        var B = String.fromCharCode(92);
+        return eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 ||
                eq.indexOf('-') !== -1 || eq.indexOf('^') !== -1 ||
                eq.indexOf('{') !== -1 || eq.indexOf('}') !== -1 ||
-               eq.indexOf(BS) !== -1 || eq.indexOf('sin') !== -1 ||
+               eq.indexOf(B) !== -1 || eq.indexOf('sin') !== -1 ||
                eq.indexOf('cos') !== -1 || eq.indexOf('log') !== -1 ||
                eq.indexOf('frac') !== -1 || eq.indexOf('sqrt') !== -1 ||
                eq.indexOf('pi') !== -1 || eq.indexOf('infty') !== -1 ||
@@ -645,38 +651,26 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                eq.indexOf('left') !== -1 || eq.indexOf('lim') !== -1 ||
                eq.indexOf('sum') !== -1 || eq.indexOf('int') !== -1;
     };
-    
-    
-    
-    
-    
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * Uses string operations (not regex) to avoid RequireJS backslash escaping.
-     * Handles: \[ equation \] → $$ equation $$
-     */var renderMarkdown = function(text) {
+
+        var renderMarkdown = function(text) {
         if (!text) return Promise.resolve('');
         text = text.trim();
         if (!text) return Promise.resolve('');
-        
-        // Normalize line endings
         text = text.replace(/\r\n/g, '\n');
-        
-        // Sanitize dangerous HTML tags but preserve safe ones
         text = text.replace(/<\s*(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
         text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*\s*>/gi, '');
-
-        text = convertDisplayMathBrackets(text);
-        
-                return loadMarked().then(function(m) {
+        text = protectMathDelimiters(text);
+        return loadMarked().then(function(m) {
             var html = m.parse(text);
+            html = unescapeMathDelimiters(html);
+            console.log('[Hermes] renderMarkdown: HTML length=' + html.length + ' hasBS=' + (html.indexOf(BS + '[') !== -1) + ' hasDollar=' + (html.indexOf('$$') !== -1));
             return html;
         }).catch(function(err) {
             console.error('[Hermes] Failed to parse markdown:', err);
             return Promise.resolve(escapeHtml(text));
         });
     };
-    
+
     /**
      * Set content of an element with markdown + math rendering
      */
