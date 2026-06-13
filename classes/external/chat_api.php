@@ -18,7 +18,7 @@ class chat_api extends external_api {
     public static function send_message_parameters() {
         return new external_function_parameters([
             'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
-            'message' => new external_value(PARAM_TEXT, 'Message text'),
+            'message' => new external_value(PARAM_RAW, 'Message text'),
         ]);
     }
 
@@ -94,7 +94,7 @@ class chat_api extends external_api {
             'messages' => new external_multiple_structure(new external_single_structure([
                 'id' => new external_value(PARAM_INT, 'Message ID'),
                 'role' => new external_value(PARAM_ALPHA, 'Role: user, assistant, tool'),
-                'content' => new external_value(PARAM_TEXT, 'Message content'),
+                'content' => new external_value(PARAM_RAW, 'Message content'),
                 'timemodified' => new external_value(PARAM_INT, 'Timestamp'),
             ])),
         ]);
@@ -231,7 +231,7 @@ class chat_api extends external_api {
     public static function save_assistant_response_parameters() {
         return new external_function_parameters([
             'conversationid' => new external_value(PARAM_INT, 'Conversation ID'),
-            'content' => new external_value(PARAM_TEXT, 'Assistant response content'),
+            'content' => new external_value(PARAM_RAW, 'Assistant response content'),
         ]);
     }
 

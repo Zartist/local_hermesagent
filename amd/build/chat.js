@@ -60,7 +60,11 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
         });
 
         // Conversation list clicks
-        $(document).on('click', '.hermes-conv-item', function() {
+        $(document).on('click', '.hermes-conv-item', function(e) {
+            // Don't navigate if clicking the rename button
+            if ($(e.target).closest('.hermes-conv-rename').length) {
+                return;
+            }
             var convId = $(this).data('conv-id');
             window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?conversationid=' + convId;
         });
@@ -97,8 +101,11 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
                 }]);
 
                 renamePromises[0].then(function() {
-                    $btn.siblings('.hermes-conv-name').text($.trim(newName));
+                    // Update the conversation name in the list item
+                    var $li = $btn.closest('.hermes-conv-item');
+                    $li.find('.hermes-conv-name').text($.trim(newName));
                     $btn.data('conv-name', $.trim(newName));
+                    $li.data('conv-name', $.trim(newName));
                 }).catch(function(ex) {
                     console.error('[Hermes] rename failed:', ex);
                 });
@@ -242,11 +249,27 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             if (eventSource.url) {
                 console.error('URL:', eventSource.url);
             }
-            messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
             eventSource.close();
             isStreaming = false;
             $('#hermes-send-btn').prop('disabled', false);
             $('#' + currentSpinnerId).remove();
+
+            // Save partial content if we have any
+            var partialContent = messageEl.text();
+            if (partialContent) {
+                var savePromises = ajax.call([{
+                    methodname: 'local_hermesagent_save_assistant_response',
+                    args: {
+                        conversationid: conversationid,
+                        content: partialContent
+                    }
+                }]);
+                savePromises[0].catch(function(ex) {
+                    console.error('[Hermes] Failed to save partial response:', ex);
+                });
+            }
+
+            messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
         });
 
         eventSource.addEventListener('done', function(e) {
@@ -255,6 +278,19 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             $('#hermes-send-btn').prop('disabled', false);
             $('#' + currentSpinnerId).remove();
             messageEl.removeClass('hermes-streaming');
+
+            // Save the final assistant response to the database
+            var finalContent = messageEl.text();
+            var savePromises = ajax.call([{
+                methodname: 'local_hermesagent_save_assistant_response',
+                args: {
+                    conversationid: conversationid,
+                    content: finalContent
+                }
+            }]);
+            savePromises[0].catch(function(ex) {
+                console.error('[Hermes] Failed to save assistant response:', ex);
+            });
         });
         }).catch(function(ex) {
             console.error('[Hermes] streamResponse error:', ex);
@@ -307,18 +343,21 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
         $('#hermes-chat-area').empty();
 
         messages.forEach(function(msg) {
+            if (!msg || !msg.content || !msg.content.trim()) {
+                return; // Skip empty messages
+            }
             if (msg.role === 'user') {
                 var html = '<div class="hermes-message hermes-user-message">';
                 html += '<div class="hermes-avatar hermes-user-avatar">U</div>';
                 html += '<div class="hermes-bubble hermes-user-bubble">';
-                html += '<div class="hermes-content">' + escapeHtml(msg.content) + '</div>';
+                html += '<div class="hermes-content">' + escapeHtml(msg.content.trim()) + '</div>';
                 html += '</div></div>';
                 $('#hermes-chat-area').append(html);
             } else if (msg.role === 'assistant') {
                 var html = '<div class="hermes-message hermes-assistant-message">';
                 html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
                 html += '<div class="hermes-bubble hermes-assistant-bubble">';
-                html += '<div class="hermes-content">' + renderMarkdown(msg.content) + '</div>';
+                html += '<div class="hermes-content">' + renderMarkdown(msg.content.trim()) + '</div>';
                 html += '</div></div>';
                 $('#hermes-chat-area').append(html);
             }
@@ -330,12 +369,65 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
      */
     var renderMarkdown = function(text) {
         if (!text) return '';
-        // Basic markdown: code blocks, bold, italic, links
-        text = text.replace(/```([^`]*)```/g, '<pre><code>$1</code></pre>');
-        text = text.replace(/`([^`]*)`/g, '<code>$1</code>');
-        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        text = text.trim();
+        if (!text) return '';
+        
+        // First, extract and protect code blocks from other processing
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(match, lang, code) {
+            var idx = codeBlocks.length;
+            var block = '<pre><code class="language-' + escapeHtml(lang || 'text') + '">' + escapeHtml(code.trim()) + '</code></pre>';
+            codeBlocks.push(block);
+            return '%%CODEBLOCK_' + idx + '%%';
+        });
+        
+        // Extract and protect inline code
+        var inlineCode = [];
+        text = text.replace(/`([^`]+)`/g, function(match, code) {
+            var idx = inlineCode.length;
+            inlineCode.push('<code>' + escapeHtml(code) + '</code>');
+            return '%%INLINE_' + idx + '%%';
+        });
+        
+        // HTML-escape the remaining text
+        text = escapeHtml(text);
+        
+        // Convert markdown syntax (after escaping, so <, >, & are safe)
+        // Headers
+        text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        
+        // Bold (use word boundaries to avoid matching inside code)
+        text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        
+        // Italic
+        text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        text = text.replace(/_(.+?)_/g, '<em>$1</em>');
+        
+        // Links [text](url)
+        text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        
+        // Unordered lists (- item or * item)
+        text = text.replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>');
+        text = text.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+        
+        // Horizontal rules
+        text = text.replace(/^---+$/gm, '<hr>');
+        
+        // Convert remaining newlines to <br> (but not inside protected blocks)
+        text = text.replace(/\n\n/g, '<br><br>');
         text = text.replace(/\n/g, '<br>');
+        
+        // Restore code blocks
+        text = text.replace(/%%CODEBLOCK_(\d+)%%/g, function(match, idx) {
+            return codeBlocks[parseInt(idx)];
+        });
+        text = text.replace(/%%INLINE_(\d+)%%/g, function(match, idx) {
+            return inlineCode[parseInt(idx)];
+        });
+        
         return text;
     };
 
@@ -351,9 +443,13 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
     /**
      * Scroll chat to bottom
      */
-    var scrollToEnd = function() {
-        var chatArea = document.getElementById('hermes-chat-area');
-        chatArea.scrollTop = chatArea.scrollHeight;
+    var shouldAutoScroll = true;
+
+    var scrollToEnd = function(force) {
+        if (force || shouldAutoScroll) {
+            var chatArea = document.getElementById('hermes-chat-area');
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
     };
 
     return {
