@@ -511,56 +511,143 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
      * Convert LLM display math brackets to MathJax $$...$$
      * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
      */
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
+     * Handles BOTH \[ equation \] AND [ equation ] (backslash may be lost in JSON round-trip).
+     */
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
+     * Handles BOTH \[ equation \] AND [ equation ] (backslash may be lost in JSON round-trip).
+     */
+    /**
+     * Convert LLM display math brackets to MathJax $$...$$
+     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
+     * Handles BOTH \[ equation \] AND [ equation ] at start of line.
+     */
     var convertDisplayMathBrackets = function(text) {
         var BS = String.fromCharCode(92);  // backslash
-        var OPEN = BS + '[';
-        var CLOSE = BS + ']';
+        var OPEN_BS = BS + '[';  // \[
+        var CLOSE_BS = BS + ']'; // \]
         
         var result = '';
         var searchStart = 0;
         
         while (searchStart < text.length) {
-            var openIdx = text.indexOf(OPEN, searchStart);
+            var openIdx = text.indexOf(OPEN_BS, searchStart);
+            
             if (openIdx === -1) {
+                // No more \[ found, append rest
                 result += text.substring(searchStart);
                 break;
             }
             
-            // Add text before the delimiter
             result += text.substring(searchStart, openIdx);
             
-            // Find closing delimiter
-            var closeIdx = text.indexOf(CLOSE, openIdx + OPEN.length);
+            var contentStart = openIdx + 2;  // skip \[
+            var closeIdx = text.indexOf(CLOSE_BS, contentStart);
+            
             if (closeIdx === -1) {
-                // No closing delimiter found, keep original
                 result += text.substring(openIdx);
                 break;
             }
             
-            // Extract equation content
-            var eq = text.substring(openIdx + OPEN.length, closeIdx).trim();
-            
-            // Check if content looks like math
-            var isMath = eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 || 
-                         eq.indexOf('-') !== -1 || eq.indexOf('^') !== -1 ||
-                         eq.indexOf('{') !== -1 || eq.indexOf('}') !== -1 ||
-                         eq.indexOf(BS) !== -1 || eq.indexOf('sin') !== -1 ||
-                         eq.indexOf('cos') !== -1 || eq.indexOf('log') !== -1 ||
-                         eq.indexOf('int') !== -1 || eq.indexOf('sum') !== -1 ||
-                         eq.indexOf('lim') !== -1;
-            
-            if (isMath) {
-                result += '$$' + eq + '$$';
-            } else {
-                // Not math, keep original
-                result += text.substring(openIdx, closeIdx + CLOSE.length);
+            // Don't cross newlines
+            var content = text.substring(contentStart, closeIdx);
+            if (content.indexOf('\n') !== -1) {
+                result += text.substring(openIdx);
+                break;
             }
             
-            searchStart = closeIdx + CLOSE.length;
+            result += processBracketBlock(text, contentStart, closeIdx + 2);
+            searchStart = closeIdx + 2;
         }
+        
+        // Now handle bare [ equation ] at start of line
+        // Split by lines, process each line
+        result = processBareBrackets(result);
         
         return result;
     };
+    
+    /**
+     * Process a bracket block: extract equation, check if math, return result
+     */
+    var processBracketBlock = function(text, contentStart, searchStart) {
+        var eq = text.substring(contentStart, searchStart - 2).trim();
+        return isMathContent(eq) ? '$$' + eq + '$$' : text.substring(contentStart - 2, searchStart);
+    };
+    
+    /**
+     * Process bare [ equation ] at start of line
+     */
+    var processBareBrackets = function(text) {
+        var lineBreak = text.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
+        var lines = text.split(lineBreak);
+        var result = [];
+        
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var processed = convertLineBareBrackets(line);
+            result.push(processed);
+        }
+        
+        return result.join(lineBreak);
+    };
+    
+    /**
+     * Convert bare [ equation ] at start of a single line
+     */
+    var convertLineBareBrackets = function(line) {
+        var openIdx = line.indexOf('[');
+        if (openIdx === -1) return line;
+        
+        // Must be at start of line (after optional whitespace)
+        var beforeOpen = line.substring(0, openIdx);
+        if (beforeOpen.trim() !== '') return line;
+        
+        var closeIdx = line.indexOf(']', openIdx + 1);
+        if (closeIdx === -1) return line;
+        
+        // Check for markdown link [text](url)
+        if (closeIdx + 1 < line.length && line[closeIdx + 1] === '(') {
+            return line;
+        }
+        
+        var eq = line.substring(openIdx + 1, closeIdx).trim();
+        
+        if (isMathContent(eq)) {
+            return beforeOpen + '$$' + eq + '$$' + line.substring(closeIdx + 1);
+        }
+        
+        return line;
+    };
+    
+    /**
+     * Check if content looks like math
+     */
+    var isMathContent = function(eq) {
+        if (!eq) return false;
+        var BS = String.fromCharCode(92);
+        // Check for math operators and LaTeX patterns
+        return eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 || 
+               eq.indexOf('-') !== -1 || eq.indexOf('^') !== -1 ||
+               eq.indexOf('{') !== -1 || eq.indexOf('}') !== -1 ||
+               eq.indexOf(BS) !== -1 || eq.indexOf('sin') !== -1 ||
+               eq.indexOf('cos') !== -1 || eq.indexOf('log') !== -1 ||
+               eq.indexOf('frac') !== -1 || eq.indexOf('sqrt') !== -1 ||
+               eq.indexOf('pi') !== -1 || eq.indexOf('infty') !== -1 ||
+               eq.indexOf('cdot') !== -1 || eq.indexOf('times') !== -1 ||
+               eq.indexOf('leq') !== -1 || eq.indexOf('geq') !== -1 ||
+               eq.indexOf('neq') !== -1 || eq.indexOf('approx') !== -1 ||
+               eq.indexOf('pm') !== -1 || eq.indexOf('right') !== -1 ||
+               eq.indexOf('left') !== -1 || eq.indexOf('lim') !== -1 ||
+               eq.indexOf('sum') !== -1 || eq.indexOf('int') !== -1;
+    };
+    
+    
+    
     
     
     /**
