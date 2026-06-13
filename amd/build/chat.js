@@ -199,6 +199,9 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
         var messageEl = addAssistantMessage();
         var currentSpinnerId = 'hermes-spinner-' + msgCounter;
 
+        // Track the raw markdown from the LLM (not the rendered HTML)
+        var rawMarkdown = '';
+
         // Get the message that was stored
         var message = $('#hermes-message-input').data('lastmessage') || '';
 
@@ -226,6 +229,9 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             try {
                 var data = JSON.parse(e.data);
                 if (data.full) {
+                    // Track the raw markdown for saving later
+                    rawMarkdown = data.full;
+                    // Render markdown to HTML for display
                     messageEl.html(renderMarkdown(data.full));
                     scrollToEnd();
                 }
@@ -254,14 +260,13 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             $('#hermes-send-btn').prop('disabled', false);
             $('#' + currentSpinnerId).remove();
 
-            // Save partial content if we have any
-            var partialContent = messageEl.text();
-            if (partialContent) {
+            // Save partial content — use raw markdown, not rendered HTML text
+            if (rawMarkdown) {
                 var savePromises = ajax.call([{
                     methodname: 'local_hermesagent_save_assistant_response',
                     args: {
                         conversationid: conversationid,
-                        content: partialContent
+                        content: rawMarkdown
                     }
                 }]);
                 savePromises[0].catch(function(ex) {
@@ -279,8 +284,9 @@ define(['jquery', 'core/ajax', 'core/str'], function($, ajax, Str) {
             $('#' + currentSpinnerId).remove();
             messageEl.removeClass('hermes-streaming');
 
-            // Save the final assistant response to the database
-            var finalContent = messageEl.text();
+            // Save the final assistant response — use raw markdown from LLM
+            // NOT messageEl.text() which strips all HTML tags
+            var finalContent = rawMarkdown;
             var savePromises = ajax.call([{
                 methodname: 'local_hermesagent_save_assistant_response',
                 args: {
