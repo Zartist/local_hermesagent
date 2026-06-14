@@ -65,5 +65,32 @@ function xmldb_local_hermesagent_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026061303, 'local', 'hermesagent');
     }
 
+    if ($oldversion < 2026061304) {
+        // Alter text fields in local_hermesagent_messages to LONGTEXT to support larger content.
+        // Moodle's XMLDB "text" type maps to MEDIUMTEXT (16MB) by default. Adding LENGTH="long"
+        // maps to LONGTEXT (4GB) for chat messages that may exceed 16MB.
+        $table = new xmldb_table('local_hermesagent_messages');
+
+        // Content field.
+        if ($dbman->field_exists($table, new xmldb_field('content'))) {
+            $field = new xmldb_field('content', XMLDB_TYPE_TEXT, 'long', null, XMLDB_NOTNULL, null, null, 'role');
+            $dbman->change_field_type($table, $field);
+        }
+
+        // Tool calls field.
+        if ($dbman->field_exists($table, new xmldb_field('tool_calls'))) {
+            $field = new xmldb_field('tool_calls', XMLDB_TYPE_TEXT, 'long', null, null, null, null, 'content');
+            $dbman->change_field_type($table, $field);
+        }
+
+        // Tool results field.
+        if ($dbman->field_exists($table, new xmldb_field('tool_results'))) {
+            $field = new xmldb_field('tool_results', XMLDB_TYPE_TEXT, 'long', null, null, null, null, 'tool_calls');
+            $dbman->change_field_type($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026061304, 'local', 'hermesagent');
+    }
+
     return true;
 }

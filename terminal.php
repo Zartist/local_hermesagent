@@ -40,7 +40,7 @@ echo 'data-sesskey="' . sesskey() . '" ';
 echo 'data-wwwroot="' . $CFG->wwwroot . '" ';
 echo 'data-hermesinstalled="' . ($hermes_installed ? 'true' : 'false') . '">';
 echo '<pre id="hermes-terminal-output" class="hermes-terminal-output"></pre>';
-echo '<div class="herms-terminal-input-row">';
+echo '<div class="hermes-terminal-input-row">';
 echo '<span id="hermes-terminal-prompt">~$ </span>';
 echo '<input type="text" id="hermes-terminal-input" class="hermes-terminal-input" autocomplete="off" spellcheck="false" />';
 echo '</div>';

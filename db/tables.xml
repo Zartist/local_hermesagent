@@ -37,9 +37,9 @@
                 <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
                 <FIELD NAME="conversationid" TYPE="int" LENGTH="10" NOTNULL="true"/>
                 <FIELD NAME="role" TYPE="char" LENGTH="20" NOTNULL="true"/>
-                <FIELD NAME="content" TYPE="text" NOTNULL="true"/>
-                <FIELD NAME="tool_calls" TYPE="text" NOTNULL="false"/>
-                <FIELD NAME="tool_results" TYPE="text" NOTNULL="false"/>
+                <FIELD NAME="content" TYPE="text" LENGTH="long" NOTNULL="true"/>
+                <FIELD NAME="tool_calls" TYPE="text" LENGTH="long" NOTNULL="false"/>
+                <FIELD NAME="tool_results" TYPE="text" LENGTH="long" NOTNULL="false"/>
                 <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
             </FIELDS>
             <KEYS>

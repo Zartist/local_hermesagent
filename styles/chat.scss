@@ -309,19 +309,61 @@ $hermes-text-muted: #64748b;
     to { transform: rotate(360deg); }
 }
 
+/* Error display */
+.hermes-error {
+    color: #dc3545;
+    padding: 0.5rem;
+    background: #f8d7da;
+    border-radius: 0.25rem;
+}
+
+/* Conversation item layout */
+.hermes-conv-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.hermes-conv-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hermes-conv-rename {
+    display: none;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.75rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: $hermes-text-muted;
+    flex-shrink: 0;
+    margin-left: 0.25rem;
+
+    &:hover {
+        color: $hermes-primary;
+    }
+}
+
+.hermes-conv-item:hover .hermes-conv-rename {
+    display: inline-block;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .hermes-chat-container {
         flex-direction: column;
         height: calc(100vh - 150px);
     }
-    
+
     .hermes-sidebar {
         width: 100%;
         min-width: 100%;
         max-height: 150px;
     }
-    
+
     .hermes-message {
         max-width: 95%;
     }

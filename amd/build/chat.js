@@ -28,7 +28,6 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     console.error('[Hermes] Failed to parse config:', e);
                 }
             }
-            console.log('[Hermes] Config loaded:', config);
             setupEventListeners();
             loadHistory();
         });
@@ -163,9 +162,6 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         scrollToEnd();
     };
 
-    /**
-     * Add assistant message to UI
-     */
     var msgCounter = 0;
 
     /**
@@ -215,14 +211,9 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         }]);
 
         sendPromises[0].then(function() {
-            console.log('[Hermes] User message saved, starting stream');
-            
             var eventSource = new EventSource(
                 M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream&conversationid=' + conversationid + '&sesskey=' + config.sesskey
             );
-
-            console.log('[Hermes] Stream URL:', eventSource.url);
-            console.log('[Hermes] Sending message:', message.substring(0, 50));
 
         // Handle the 'message' event from api.php SSE stream
         eventSource.addEventListener('message', function(e) {
@@ -371,10 +362,8 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 
                 // Render markdown + math asynchronously
                 var $content = chatArea.find('.hermes-content').last();
-                console.log('[Hermes] renderMessages: rendering assistant msg');
                 var promise = renderMarkdown(msg.content.trim()).then(function(mdHtml) {
                     $content.html(mdHtml);
-                    console.log('[Hermes] renderMessages: calling typesetMath');
                     typesetMath($content[0]);
                 });
                 promises.push(promise);
@@ -386,11 +375,8 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     };
 
     /**
-     * Simple markdown renderer
-     */
-    /**
-     * Marked.js - loaded from CDN on first use
-     * NOTE: Moodle sets define.amd=true globally, so marked UMD tries to register
+     * Marked.js - loaded from CDN on first use.
+     * Moodle sets define.amd=true globally, so marked UMD tries to register
      * as an AMD module instead of setting window.marked. We must temporarily
      * hide define.amd while loading the script.
      */
@@ -473,48 +459,39 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             }),
             lang: 'en'
         });
-        
-        console.log('[Hermes] MathJax configured via Moodle loader');
     };
-    
+
     /**
-     * Typeset math in an element using Moodle's MathJax loader
+     * Typeset math in an element using Moodle's MathJax loader.
+     * Waits for MathJax startup before calling typesetPromise.
+     * @param {HTMLElement} element - DOM element containing math to typeset
      */
-        var typesetMath = function(element) {
-        console.log('[Hermes] >>> typesetMath START');
+    var typesetMath = function(element) {
         configureMathJax();
-        
+
         var loadPromise = mathjaxLoader.loadMathJax();
-        
+
         loadPromise.then(function() {
-            console.log('[Hermes] >>> loadMathJax RESOLVED');
-            console.log('[Hermes] >>> window.MathJax:', window.MathJax ? 'exists' : 'undefined');
-            console.log('[Hermes] >>> typesetPromise:', window.MathJax ? typeof window.MathJax.typesetPromise : 'N/A');
-            
-            // Wait for startup.promise to resolve first
-            // On revisit, MathJax may be mid-initialization
-            if (window.MathJax && window.MathJax.startup) {
-                console.log('[Hermes] >>> waiting for startup.promise');
+            if (!window.MathJax) {
+                console.error('[Hermes] MathJax not available after loadMathJax');
+                return;
+            }
+
+            // Wait for startup.promise to resolve before calling typesetPromise
+            // On page revisit, MathJax may still be initializing
+            if (window.MathJax.startup && window.MathJax.startup.promise) {
                 return window.MathJax.startup.promise.then(function() {
-                    console.log('[Hermes] >>> startup.promise RESOLVED');
-                    console.log('[Hermes] >>> typesetPromise after startup:', typeof window.MathJax.typesetPromise);
-                    
                     if (window.MathJax.typesetPromise) {
-                        console.log('[Hermes] >>> calling typesetPromise');
-                        return window.MathJax.typesetPromise([element]).then(function(r) {
-                            console.log('[Hermes] >>> typesetPromise DONE, results:', r);
-                        });
+                        return window.MathJax.typesetPromise([element]);
                     } else {
-                        console.error('[Hermes] >>> typesetPromise STILL NOT AVAILABLE after startup.promise');
-                        console.log('[Hermes] >>> MathJax object keys:', Object.keys(window.MathJax));
+                        console.error('[Hermes] typesetPromise not available after startup');
                     }
                 });
-            } else if (window.MathJax && window.MathJax.typesetPromise) {
-                // Startup promise doesn't exist but typesetPromise does (edge case)
-                console.log('[Hermes] >>> calling typesetPromise directly');
+            } else if (window.MathJax.typesetPromise) {
+                // Startup already complete (edge case)
                 return window.MathJax.typesetPromise([element]);
             } else {
-                console.error('[Hermes] >>> neither startup.promise nor typesetPromise available');
+                console.error('[Hermes] neither startup.promise nor typesetPromise available');
             }
         }).catch(function(e) {
             console.error('[Hermes] loadMathJax error:', e);
@@ -522,34 +499,18 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     };
     
     /**
-     * Render markdown to HTML and typeset math
-     * Uses marked.js for GFM rendering + MathJax v4 for math
+     * Math rendering pipeline — converts LLM math markup to MathJax-compatible TeX.
+     *
+     * Pipeline stages:
+     * 1. Protect math delimiters: replace \[...\], [...], and $$...$$ with
+     *    unicode placeholders so marked.js doesn't mangle them.
+     * 2. Render markdown with marked.js (GFM mode).
+     * 3. Unescape placeholders back to \[...\] for MathJax.
+     * 4. Call MathJax.typesetPromise() to render the math in the DOM.
+     *
+     * String.fromCharCode(92) is used for backslash to avoid RequireJS escaping.
      */
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * LLM outputs: \[ equation \] or [ equation ]
-     * Uses string operations (not regex) to avoid RequireJS backslash escaping.
-     */
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
-     */
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
-     * Handles BOTH \[ equation \] AND [ equation ] (backslash may be lost in JSON round-trip).
-     */
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
-     * Handles BOTH \[ equation \] AND [ equation ] (backslash may be lost in JSON round-trip).
-     */
-    /**
-     * Convert LLM display math brackets to MathJax $$...$$
-     * Uses String.fromCharCode(92) for backslash to avoid RequireJS escaping.
-     * Handles BOTH \[ equation \] AND [ equation ] at start of line.
-     */
-        var BS = String.fromCharCode(92);
+    var BS = String.fromCharCode(92);
     var MATH_OPEN_PLACEHOLDER = String.fromCharCode(57344);
     var MATH_CLOSE_PLACEHOLDER = String.fromCharCode(57345);
 
@@ -579,7 +540,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             }
             searchStart = closeIdx + CLOSE.length;
         }
-        result += text.substring(searchStart);
+        // NOTE: do NOT append text.substring(searchStart) here —
+        // all exit paths (break/continue/normal) already handle it:
+        // - break at line 526: already appends rest on line 525
+        // - normal exit: searchStart == text.length, substring returns empty
         result = protectBareBrackets(result);
         result = convertLegacyDollars(result);
         return result;
@@ -652,7 +616,12 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                eq.indexOf('sum') !== -1 || eq.indexOf('int') !== -1;
     };
 
-        var renderMarkdown = function(text) {
+    /**
+     * Render markdown to HTML (protects math delimiters during rendering).
+     * @param {string} text - Markdown text possibly containing math
+     * @returns {Promise<string>} HTML string with math delimiters intact
+     */
+    var renderMarkdown = function(text) {
         if (!text) return Promise.resolve('');
         text = text.trim();
         if (!text) return Promise.resolve('');
@@ -660,10 +629,13 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         text = text.replace(/<\s*(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
         text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*\s*>/gi, '');
         text = protectMathDelimiters(text);
+        console.log('[Hermes] renderMarkdown: after protect len=' + text.length + ' preview=' + text.substring(0, 100));
         return loadMarked().then(function(m) {
+            console.log('[Hermes] renderMarkdown: before parse len=' + text.length + ' preview=' + text.substring(0, 100));
             var html = m.parse(text);
+            console.log('[Hermes] renderMarkdown: m.parse output len=' + html.length + ' preview=' + html.substring(0, 100));
             html = unescapeMathDelimiters(html);
-            console.log('[Hermes] renderMarkdown: HTML length=' + html.length + ' hasBS=' + (html.indexOf(BS + '[') !== -1) + ' hasDollar=' + (html.indexOf('$$') !== -1));
+            console.log('[Hermes] renderMarkdown: after unescape len=' + html.length + ' preview=' + html.substring(0, 100));
             return html;
         }).catch(function(err) {
             console.error('[Hermes] Failed to parse markdown:', err);
@@ -675,7 +647,9 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
      * Set content of an element with markdown + math rendering
      */
     var setMarkdownContent = function(element, text) {
+        console.log('[Hermes] setMarkdownContent: input len=' + text.length + ' preview=' + text.substring(0, 80));
         renderMarkdown(text).then(function(html) {
+            console.log('[Hermes] setMarkdownContent: html len=' + html.length + ' preview=' + html.substring(0, 100));
             element.html(html);
             typesetMath(element[0]);
         });

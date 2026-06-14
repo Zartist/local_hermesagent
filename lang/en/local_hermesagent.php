@@ -4,6 +4,9 @@ defined('MOODLE_INTERNAL') || die();
 $string['pluginname'] = 'Hermes Agent';
 $string['pluginadministration'] = 'Hermes Agent administration';
 
+// Terminal
+$string['terminal'] = 'Hermes Terminal';
+
 // Settings
 $string['settings_description'] = 'Configure the Hermes Agent bridge and provider settings.';
 $string['hermes_description'] = 'Path to the hermes CLI. Leave blank to search PATH.';
@@ -33,6 +36,23 @@ $string['approve_tools'] = 'Approve tool execution';
 
 // Privacy
 $string['privacy:metadata'] = 'The Hermes Agent plugin stores chat conversations and learned skills.';
+$string['privacy:metadata:conversation'] = 'Conversation metadata including name and timestamps.';
+$string['privacy:metadata:conversation:id'] = 'Conversation ID';
+$string['privacy:metadata:conversation:name'] = 'Conversation name';
+$string['privacy:metadata:conversation:usermodified'] = 'User who modified the conversation';
+$string['privacy:metadata:conversation:acpsessionid'] = 'ACP session identifier';
+$string['privacy:metadata:conversation:timemodified'] = 'Last modified timestamp';
+$string['privacy:metadata:conversation:timecreated'] = 'Created timestamp';
+$string['privacy:metadata:message'] = 'Chat message content including role, text, and tool data.';
+$string['privacy:metadata:message:id'] = 'Message ID';
+$string['privacy:metadata:message:conversationid'] = 'Parent conversation ID';
+$string['privacy:metadata:message:role'] = 'Message role (user/assistant)';
+$string['privacy:metadata:message:content'] = 'Message text content';
+$string['privacy:metadata:message:toolcalls'] = 'Tool call data';
+$string['privacy:metadata:message:toolresults'] = 'Tool execution results';
+$string['privacy:metadata:message:timemodified'] = 'Last modified timestamp';
+$string['privacy:conversations'] = 'Conversations';
+$string['privacy:messages'] = 'Messages';
 
 $string['backto'] = 'Back to settings';
 $string['rename'] = 'Rename';

@@ -20,14 +20,26 @@ if ($action === 'start') {
             new moodle_url('/admin/settings.php?section=local_hermesagent_settings'));
     }
 
-    $cmd = sprintf(
-        'HERMES_HOME=%s BRIDGE_PORT=%d MOODLE_DB_HOST=%s MOODLE_DB_NAME=%s MOODLE_DB_USER=%s MOODLE_DB_PASS=%s nohup %s/venv/bin/python %s > /var/www/moodledata/.hermes/logs/bridge.log 2>&1 & echo $!',
-        escapeshellarg($hermes_home),
-        $bridge_port,
+    // Write DB credentials to a temporary file with restricted permissions instead
+    // of passing the password as an environment variable (visible in /proc/PID/environ).
+    $cred_dir = "$hermes_home/.credentials";
+    @mkdir($cred_dir, 0700, true);
+    $cred_file = "$cred_dir/db.env";
+    $cred_contents = sprintf(
+        "MOODLE_DB_HOST=%s\nMOODLE_DB_NAME=%s\nMOODLE_DB_USER=%s\nMOODLE_DB_PASS=%s\n",
         escapeshellarg($CFG->dbhost),
         escapeshellarg($CFG->dbname),
         escapeshellarg($CFG->dbuser),
-        escapeshellarg($CFG->dbpass),
+        escapeshellarg($CFG->dbpass)
+    );
+    file_put_contents($cred_file, $cred_contents, LOCK_EX);
+    chmod($cred_file, 0600);
+
+    $cmd = sprintf(
+        'HERMES_HOME=%s BRIDGE_PORT=%d MOODLE_DB_CREDENTIALS_FILE=%s nohup %s/venv/bin/python %s > /var/www/moodledata/.hermes/logs/bridge.log 2>&1 & echo $!',
+        escapeshellarg($hermes_home),
+        $bridge_port,
+        escapeshellarg($cred_file),
         $hermes_home,
         escapeshellarg($bridge_script)
     );
@@ -49,6 +61,11 @@ if ($action === 'start') {
     }
     set_config('bridge_status', 'stopped', 'local_hermesagent');
     set_config('bridge_pid', '', 'local_hermesagent');
+    // Securely remove credential file
+    $cred_file = "$hermes_home/.credentials/db.env";
+    if (file_exists($cred_file)) {
+        unlink($cred_file);
+    }
 }
 
 redirect(new moodle_url('/admin/settings.php?section=local_hermesagent_settings'));

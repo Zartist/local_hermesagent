@@ -15,12 +15,17 @@ require_capability('local/hermesagent:use', context_system::instance());
 
 $PAGE->set_context(context_system::instance());
 
-// CSRF check — Moodle sesskey in URL protects SSE stream; only guard JSON POST actions.
+// CSRF protection: validate sesskey for all actions.
 $action = required_param('action', PARAM_ALPHA);
-if ($action !== 'stream') {
-    if (!isset($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] !== 'XMLHttpRequest') {
-        send_json_response(['error' => 'Access denied']);
+if ($action === 'stream') {
+    // SSE stream passes sesskey as a query parameter — confirm it matches current session.
+    $stream_sesskey = optional_param('sesskey', '', PARAM_ALPHANUM);
+    if ($stream_sesskey === '' || !confirm_sesskey($stream_sesskey)) {
+        send_json_response(['error' => 'Invalid sesskey']);
     }
+} else {
+    // All other actions require a valid sesskey (POST body or standard Moodle mechanism).
+    require_sesskey();
 }
 
 switch ($action) {
@@ -58,7 +63,17 @@ function api_send_message(): void {
     if (empty($message)) {
         send_json_response(['error' => 'Empty message']);
     }
-    
+
+    // Check conversation ownership
+    $conv = $DB->get_record('local_hermesagent_conversations', [
+        'id' => $conversationid,
+        'usermodified' => $USER->id,
+    ], '*');
+
+    if (!$conv) {
+        send_json_response(['error' => 'Invalid conversation']);
+    }
+
     // Save user message
     $rec = new stdClass();
     $rec->conversationid = $conversationid;
@@ -66,16 +81,13 @@ function api_send_message(): void {
     $rec->content = $message;
     $rec->timemodified = time();
     $msgid = $DB->insert_record('local_hermesagent_messages', $rec);
-    
+
     // Update conversation timestamp
-    $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $conversationid]);
-    if ($conv) {
-        $conv->timemodified = time();
-        if ($conv->name == 'New conversation') {
-            $conv->name = clean_param(substr($message, 0, 60), PARAM_NOTAGS);
-        }
-        $DB->update_record('local_hermesagent_conversations', $conv);
+    $conv->timemodified = time();
+    if ($conv->name == 'New conversation') {
+        $conv->name = clean_param(substr($message, 0, 60), PARAM_NOTAGS);
     }
+    $DB->update_record('local_hermesagent_conversations', $conv);
     
     send_json_response([
         'messageid' => $msgid,
@@ -90,7 +102,20 @@ function api_stream_response(): void {
     global $DB, $USER;
     
     $conversationid = required_param('conversationid', PARAM_INT);
-    
+
+    // Check conversation ownership
+    $conv = $DB->get_record('local_hermesagent_conversations', [
+        'id' => $conversationid,
+        'usermodified' => $USER->id,
+    ], '*');
+
+    if (!$conv) {
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        echo "event: error\ndata: " . json_encode(['error' => 'Invalid conversation']) . "\n\n";
+        die();
+    }
+
     $bridge_port = local_hermesagent_get_bridge_port();
     $bridge_url = "http://127.0.0.1:$bridge_port";
     
@@ -182,6 +207,7 @@ function api_stream_response(): void {
                     
                     if (isset($json['delta'])) {
                         $assistant_content .= $json['delta'];
+                        error_log('[Hermes] SSE delta len=' . strlen($json['delta']) . ' full len=' . strlen($assistant_content) . ' full_preview=' . substr(strip_tags($assistant_content), 0, 80));
                         echo "event: message\ndata: " . json_encode(['delta' => $json['delta'], 'full' => $assistant_content]) . "\n\n";
                         flush();
                     }
@@ -245,10 +271,20 @@ function api_bridge_status(): void {
  * Get conversation history
  */
 function api_get_history(): void {
-    global $DB;
-    
+    global $DB, $USER;
+
     $conversationid = required_param('conversationid', PARAM_INT);
-    
+
+    // Check conversation ownership
+    $conv = $DB->get_record('local_hermesagent_conversations', [
+        'id' => $conversationid,
+        'usermodified' => $USER->id,
+    ], '*');
+
+    if (!$conv) {
+        send_json_response(['error' => 'Invalid conversation']);
+    }
+
     $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $conversationid], 'id ASC');
     
     $result = [];

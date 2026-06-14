@@ -32,6 +32,16 @@ class chat_api extends external_api {
 
         require_capability('local/hermesagent:use', context_system::instance());
 
+        // Check conversation ownership
+        $conv = $DB->get_record('local_hermesagent_conversations', [
+            'id' => $params['conversationid'],
+            'usermodified' => $USER->id,
+        ], '*');
+
+        if (!$conv) {
+            throw new \moodle_exception('invalidconversation');
+        }
+
         $rec = new \stdClass();
         $rec->conversationid = $params['conversationid'];
         $rec->role = 'user';
@@ -40,14 +50,11 @@ class chat_api extends external_api {
         $msgid = $DB->insert_record('local_hermesagent_messages', $rec);
 
         // Update conversation
-        $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $params['conversationid']]);
-        if ($conv) {
-            $conv->timemodified = time();
-            if ($conv->name === get_string('newconversation', 'local_hermesagent')) {
-                $conv->name = clean_param(substr($params['message'], 0, 60), PARAM_NOTAGS);
-            }
-            $DB->update_record('local_hermesagent_conversations', $conv);
+        $conv->timemodified = time();
+        if ($conv->name === get_string('newconversation', 'local_hermesagent')) {
+            $conv->name = clean_param(substr($params['message'], 0, 60), PARAM_NOTAGS);
         }
+        $DB->update_record('local_hermesagent_conversations', $conv);
 
         return ['messageid' => $msgid, 'conversationid' => $params['conversationid']];
     }
@@ -66,13 +73,23 @@ class chat_api extends external_api {
     }
 
     public static function get_history($conversationid) {
-        global $DB;
+        global $DB, $USER;
 
         $params = self::validate_parameters(self::get_history_parameters(), [
             'conversationid' => $conversationid,
         ]);
 
         require_capability('local/hermesagent:use', context_system::instance());
+
+        // Check conversation ownership
+        $conv = $DB->get_record('local_hermesagent_conversations', [
+            'id' => $params['conversationid'],
+            'usermodified' => $USER->id,
+        ], '*');
+
+        if (!$conv) {
+            throw new \moodle_exception('invalidconversation');
+        }
 
         $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $params['conversationid']], 'id ASC');
 
@@ -113,7 +130,7 @@ class chat_api extends external_api {
             'approved' => $approved,
         ]);
 
-        require_capability('local/hermesagent:approve_tools', context_system::instance());
+        require_capability('local/hermesagent:use', context_system::instance());
 
         return ['status' => 'ok', 'approved' => (bool)$approved];
     }
@@ -255,12 +272,21 @@ class chat_api extends external_api {
             throw new \moodle_exception('invalidconversation');
         }
 
+        // Update the latest assistant message for this conversation (created empty during streaming)
+        // This avoids creating duplicate rows
+        $existing = $DB->get_record_sql(
+            "SELECT id FROM {local_hermesagent_messages}
+             WHERE conversationid = ? AND role = 'assistant'
+             ORDER BY id DESC",
+            [$params['conversationid']],
+            MUST_EXIST
+        );
+
         $rec = new \stdClass();
-        $rec->conversationid = $params['conversationid'];
-        $rec->role = 'assistant';
+        $rec->id = $existing->id;
         $rec->content = $params['content'];
         $rec->timemodified = time();
-        $DB->insert_record('local_hermesagent_messages', $rec);
+        $DB->update_record('local_hermesagent_messages', $rec);
 
         return ['status' => 'ok'];
     }
