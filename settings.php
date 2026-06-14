@@ -33,7 +33,7 @@ if ($hassiteconfig) {
         $health_data = json_decode($bridge_health, true);
     }
 
-    $hermes_home = '/var/www/moodledata/.hermes';
+    $hermes_home = '${HERMES_HOME} (default: /var/www/moodledata/.hermes)';
     $hermes_installed = file_exists("$hermes_home/venv/bin/hermes");
     $hermes_version = 'Not installed';
     if ($hermes_installed) {
