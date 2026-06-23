@@ -1,7 +1,7 @@
 #!/bin/sh
 # Hermes ACP Bridge process manager
 # Runs as www-data (no sudo needed)
-# Actions: start-proxy, stop-proxy, start-acp, stop-acp, start, stop, restart, status
+# Actions: start, stop, restart, status
 
 HERMES_HOME="${HERMES_HOME:-/var/www/moodledata/.hermes}"
 PID_DIR="$HERMES_HOME/pids"
@@ -19,14 +19,35 @@ pid_is_running() {
 
 stop_by_pid() {
     pid_file="$1"
-    [ -f "$pid_file" ] || return 0
-    pid=$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$pid" ]; then
-        kill "$pid" 2>/dev/null
-        sleep 1
-        pid_is_running "$pid_file" && kill -9 "$pid" 2>/dev/null
+    if [ -f "$pid_file" ]; then
+        pid=$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$pid" ]; then
+            kill "$pid" 2>/dev/null
+            sleep 1
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+        fi
+        rm -f "$pid_file"
     fi
-    rm -f "$pid_file"
+}
+
+stop_by_pattern() {
+    # Fallback: kill processes matching the given command pattern
+    pattern="$1"
+    pids=$(pgrep -f "$pattern" 2>/dev/null)
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            # Don't kill ourselves
+            [ "$pid" = "$$" ] && continue
+            kill "$pid" 2>/dev/null
+        done
+        sleep 1
+        # Force kill anything still alive
+        pids=$(pgrep -f "$pattern" 2>/dev/null)
+        for pid in $pids; do
+            [ "$pid" = "$$" ] && continue
+            kill -9 "$pid" 2>/dev/null
+        done
+    fi
 }
 
 start_proxy() {
@@ -65,43 +86,49 @@ start_acp() {
     fi
 }
 
+do_stop() {
+    # First try PID files
+    stop_by_pid "$PROXY_PID_FILE"
+    stop_by_pid "$ACP_PID_FILE"
+
+    # Fallback: kill by command pattern (catches orphaned processes)
+    stop_by_pattern "hermes_proxy_forward.py"
+    stop_by_pattern "hermes acp"
+    stop_by_pattern "moodle_db_mcp.py"
+
+    echo "stopped"
+}
+
+do_start() {
+    # Kill any stale processes first
+    stop_by_pattern "hermes_proxy_forward.py"
+    stop_by_pattern "hermes acp"
+    stop_by_pattern "moodle_db_mcp.py"
+    rm -f "$PROXY_PID_FILE" "$ACP_PID_FILE"
+    sleep 1
+
+    proxy_pid=$(start_proxy)
+    proxy_ret=$?
+    acp_pid=$(start_acp)
+    acp_ret=$?
+    echo "proxy=$proxy_pid acp=$acp_pid proxy_ret=$proxy_ret acp_ret=$acp_ret"
+}
+
+do_restart() {
+    do_stop
+    sleep 1
+    do_start
+}
+
 case "$1" in
-    start-proxy)
-        start_proxy
-        ;;
-    stop-proxy)
-        stop_by_pid "$PROXY_PID_FILE"
-        echo "stopped"
-        ;;
-    start-acp)
-        start_acp
-        ;;
-    stop-acp)
-        stop_by_pid "$ACP_PID_FILE"
-        echo "stopped"
-        ;;
     start)
-        proxy_pid=$(start_proxy)
-        proxy_ret=$?
-        acp_pid=$(start_acp)
-        acp_ret=$?
-        echo "proxy=$proxy_pid acp=$acp_pid proxy_ret=$proxy_ret acp_ret=$acp_ret"
+        do_start
         ;;
     stop)
-        stop_by_pid "$PROXY_PID_FILE"
-        stop_by_pid "$ACP_PID_FILE"
-        echo "stopped"
+        do_stop
         ;;
     restart)
-        stop_by_pid "$PROXY_PID_FILE"
-        stop_by_pid "$ACP_PID_FILE"
-        sleep 1
-        # Inline start logic
-        proxy_pid=$(start_proxy)
-        proxy_ret=$?
-        acp_pid=$(start_acp)
-        acp_ret=$?
-        echo "proxy=$proxy_pid acp=$acp_pid proxy_ret=$proxy_ret acp_ret=$acp_ret"
+        do_restart
         ;;
     status)
         proxy_pid=""
@@ -125,7 +152,7 @@ case "$1" in
         echo "proxy=$proxy_pid acp=$acp_pid"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|start-proxy|stop-proxy|start-acp|stop-acp|status}" >&2
+        echo "Usage: $0 {start|stop|restart|status}" >&2
         exit 1
         ;;
 esac
