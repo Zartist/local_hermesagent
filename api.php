@@ -214,7 +214,7 @@ function api_stream_response(): void {
         CURLOPT_RETURNTRANSFER => false,
         CURLOPT_HEADER => false,
         CURLOPT_TIMEOUT => 300,
-        CURLOPT_WRITEFUNCTION => function($curl, $data) use ($conversationid, $DB) {
+        CURLOPT_WRITEFUNCTION => function($curl, $data) use ($conversationid, $DB, $req_id) {
             _hermes_log('api_stream_response: Received ' . strlen($data) . ' bytes from bridge');
             static $assistant_content = '';
             static $reasoning_content = '';

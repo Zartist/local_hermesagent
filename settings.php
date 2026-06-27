@@ -1,6 +1,8 @@
 <?php
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/local/hermesagent/lib.php');
+
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_hermesagent_settings', get_string('pluginname', 'local_hermesagent'));
 
@@ -19,10 +21,6 @@ if ($hassiteconfig) {
     }
 
     $hermes_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
-
-    // Path to the bridge control script (installed alongside plugin)
-    $PLUGIN_DIR = __DIR__;
-    $BRIDGE_SCRIPT = $PLUGIN_DIR . '/hermes-bridge-control.sh';
 
     // Handle Restart action inline
     $action = optional_param('action', '', PARAM_ALPHANUM);
