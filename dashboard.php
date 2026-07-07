@@ -190,6 +190,17 @@ if (strpos($path, '/api/') !== 0 && $http_code === 200) {
             'window.__HERMES_BASE_PATH__="' . $proxy_base_path . '"',
             $response_body
         );
+        // Disable embedded chat — it uses WebSockets which PHP-FPM cannot proxy.
+        // This prevents the SPA from endlessly retrying wss:// connections.
+        $response_body = str_replace(
+            'window.__HERMES_DASHBOARD_EMBEDDED_CHAT__=true',
+            'window.__HERMES_DASHBOARD_EMBEDDED_CHAT__=false',
+            $response_body
+        );
+        // Safety net: silently reject WebSocket connections to the proxy so
+        // any remaining ws:// or wss:// attempts fail immediately without retry loops.
+        $ws_guard = '<script>(function(){var O=window.WebSocket;window.WebSocket=function(u,p){if(u&&u.indexOf("dashboard.php")!==-1){return {readyState:3,send:function(){},close:function(){},addEventListener:function(){},removeEventListener:function(){},onopen:null,onmessage:null,onclose:null,onerror:null};}return p?new O(u,p):new O(u);};window.WebSocket.prototype=O.prototype;})();</script>';
+        $response_body = str_replace('</head>', $ws_guard . '</head>', $response_body);
     }
 }
 
