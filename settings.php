@@ -2,6 +2,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->dirroot . '/local/hermesagent/lib.php');
+require_once($CFG->dirroot . '/local/hermesagent/classes/admin/setting_configfile.php');
 
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_hermesagent_settings', get_string('pluginname', 'local_hermesagent'));
@@ -121,6 +122,15 @@ if ($hassiteconfig) {
         get_string('bridge_port', 'local_hermesagent'),
         get_string('bridge_port_desc', 'local_hermesagent'),
         $bridge_port, PARAM_INT));
+
+    // Hermes config.yaml — read/write directly from file (single source of truth)
+    $settings->add(new \local_hermesagent\admin\setting_configfile(
+        'local_hermesagent/config_yaml',
+        get_string('config_yaml', 'local_hermesagent'),
+        get_string('config_yaml_desc', 'local_hermesagent'),
+        "$hermes_home/config.yaml",
+        ''
+    ));
 
     // --- Gateway section ---
     $gw_running = local_hermesagent_is_gateway_running();

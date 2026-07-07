@@ -5,6 +5,21 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.3.11] — 2026-07-07
+
+### Added
+
+#### Hermes config.yaml direct editor
+- **`classes/admin/setting_configfile.php`** — custom `admin_setting` class
+  that reads/writes a file directly (not the Moodle DB). The file is the
+  single source of truth — no stale DB copy. Edits via Moodle, the
+  dashboard, or the CLI all modify the same file.
+- **config.yaml textarea** on the settings page — edit the full Hermes
+  configuration (model, provider, agent settings, toolsets, etc.) directly.
+  Changes are written to `$HERMES_HOME/config.yaml` on save.
+
+---
+
 ## [0.3.10] — 2026-07-07
 
 ### Added
