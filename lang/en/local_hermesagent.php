@@ -56,3 +56,8 @@ $string['privacy:messages'] = 'Messages';
 
 $string['backto'] = 'Back to settings';
 $string['rename'] = 'Rename';
+
+// Slash commands
+$string['slash_help'] = 'Slash commands: /stop (abort response), /new (new conversation), /clear (clear view), /status (bridge health), /help (this message)';
+$string['slash_stopped'] = 'Response stopped.';
+$string['slash_cleared'] = 'Conversation view cleared.';

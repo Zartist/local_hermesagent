@@ -1,7 +1,9 @@
 <?php
 /**
- * Handle settings actions (start/stop/restart/update) for local_hermesagent
- * This is accessed directly via URL, not through admin navigation
+ * Handle settings actions (start/stop/restart/update) for local_hermesagent.
+ * Accessed directly via URL from the admin settings page.
+ *
+ * Uses hermes-bridge-control.sh for process management (no tmux).
  */
 
 require_once(__DIR__ . '/../../config.php');
@@ -14,58 +16,66 @@ $hermes_home = '/var/www/moodledata/.hermes';
 $action = required_param('action', PARAM_ALPHANUM);
 confirm_sesskey();
 
-$bridge_port = get_config('local_hermesagent', 'bridge_port');
-if (empty($bridge_port)) {
-    $bridge_port = '9118';
-}
-
+$bridge_port = local_hermesagent_get_bridge_port();
 $redirect_url = $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings';
 $message = '';
 
+// The control script lives in the plugin directory.
+$control_script = __DIR__ . '/hermes-bridge-control.sh';
+
 switch ($action) {
-        case 'start':
-        exec('tmux has-session -t hermes-acp 2>&1', $output, $ret);
-        if ($ret !== 0) {
-            $cmd = 'tmux new-session -d -s hermes-acp -x 80 -y 24 "su -s /bin/sh -c \"HERMES_HOME=' . $hermes_home . ' ' . $hermes_home . '/venv/bin/hermes acp\" www-data" 2>&1';
-            exec($cmd, $output, $ret);
-            $message = $ret === 0 ? 'ACP started (www-data)' : 'Failed: ' . implode(' ', $output);
+    case 'start':
+        $cmd = escapeshellarg($control_script) . ' start 2>&1';
+        exec($cmd, $output, $ret);
+        $message = implode("\n", $output);
+        if ($ret === 0 && strpos($message, 'FAILED') === false) {
+            $message = 'ACP Bridge started: ' . $message;
         } else {
-            $message = 'ACP already running';
+            $message = 'Failed to start: ' . $message;
         }
         break;
 
     case 'stop':
-        exec('tmux kill-session -t hermes-acp 2>&1', $output, $ret);
-        $message = $ret === 0 ? 'ACP stopped' : 'Failed: ' . implode(' ', $output);
+        $cmd = escapeshellarg($control_script) . ' stop 2>&1';
+        exec($cmd, $output, $ret);
+        $message = 'ACP Bridge stopped';
         break;
 
     case 'restart':
-        exec('tmux kill-session -t hermes-acp 2>&1', $output, $ret);
-        sleep(1);
-        $cmd = 'tmux new-session -d -s hermes-acp -x 80 -y 24 "su -s /bin/sh -c \"HERMES_HOME=' . $hermes_home . ' ' . $hermes_home . '/venv/bin/hermes acp\" www-data" 2>&1';
+        $cmd = escapeshellarg($control_script) . ' restart 2>&1';
         exec($cmd, $output, $ret);
-        sleep(3);
-        exec('tmux capture-pane -t hermes-acp -p 2>&1', $output, $ret2);
-        $output_str = implode(' ', $output);
-        if (strpos($output_str, 'ACP client connected') !== false) {
-            $message = 'ACP restarted (www-data, MCP: ' . (strpos($output_str, 'mcp_moodle_db') !== false ? '✅' : '⚠') . ')';
+        $output_str = implode("\n", $output);
+        sleep(2);
+        // Health check after restart
+        $ch = curl_init("http://127.0.0.1:$bridge_port/health");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 3]);
+        $resp = curl_exec($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($resp !== false && $http == 200) {
+            $message = 'ACP Bridge restarted: ' . $output_str;
         } else {
-            $message = 'ACP restart: ' . htmlspecialchars($output_str);
+            $message = 'Restarted but bridge not responding on port ' . $bridge_port . ': ' . $output_str;
         }
         break;
+
     case 'update':
-        // Pull latest plugin code
-        $plugin_dir = __DIR__;
-        exec('cd "' . $plugin_dir . '" && git pull 2>&1', $output, $ret);
-        $update_result = $ret === 0 ? 'git pull OK' : 'git pull: ' . implode(" ", $output);
-        // Run bootstrap
-        exec('"' . __DIR__ . '/scripts/bootstrap.sh" 2>&1', $bootstrap_output, $ret2);
-        $bootstrap_result = implode(" ", $bootstrap_output);
-        $message = $update_result . " | Bootstrap: " . $bootstrap_result;
+        // Run bootstrap.sh to install/update Hermes venv + bridge + MCP scripts.
+        // Plugin code updates come from the host via `make sync`, not git pull.
+        $bootstrap_script = escapeshellarg(__DIR__ . '/scripts/bootstrap.sh');
+        $env = 'HERMES_HOME=' . escapeshellarg($hermes_home);
+        $cmd = $env . ' sh ' . $bootstrap_script . ' 2>&1';
+        exec($cmd, $output, $ret);
+        $output_str = implode("\n", $output);
+        if ($ret === 0) {
+            $message = 'Bootstrap complete: ' . $output_str;
+        } else {
+            $message = 'Bootstrap errors (exit ' . $ret . '): ' . $output_str;
+        }
         break;
 
     default:
-        $message = "Unknown action: " . $action;
+        $message = 'Unknown action: ' . $action;
 }
 
-redirect($redirect_url, $message, 3, \core\output\notification::NOTIFY_INFO);
+redirect($redirect_url, $message, 5, \core\output\notification::NOTIFY_INFO);

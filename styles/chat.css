@@ -392,3 +392,25 @@
 .hermes-tool-status {
     font-size: 0.9em;
 }
+
+/* System messages (slash command feedback) */
+.hermes-system-message {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    margin: 4px auto;
+    max-width: 500px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #64748b;
+}
+.hermes-system-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+.hermes-system-content {
+    flex: 1;
+}

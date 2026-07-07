@@ -47,8 +47,9 @@ function local_hermesagent_get_bridge_port(): int {
 }
 
 /**
- * Live-check the ACP bridge health and sync the DB.
- * Replaces stale DB-only reads with a real HTTP ping.
+ * Live-check the ACP bridge health via HTTP.
+ * Does NOT write to the DB — this is called frequently and a DB write
+ * on every check causes lock contention.
  */
 function local_hermesagent_check_bridge_status(): string {
     $bridge_port = local_hermesagent_get_bridge_port();
@@ -64,12 +65,9 @@ function local_hermesagent_check_bridge_status(): string {
     curl_close($ch);
 
     if ($resp !== false && $http_code === 200) {
-        local_hermesagent_set_setting('bridge_status', 'running');
         return 'running';
-    } else {
-        local_hermesagent_set_setting('bridge_status', 'stopped');
-        return 'stopped';
     }
+    return 'stopped';
 }
 
 /**
@@ -92,6 +90,10 @@ function local_hermesagent_get_skills(?string $category = null, bool $enabled_on
 /**
  * Ensure the ACP bridge is running. Starts it lazily if not.
  * Returns true if bridge is healthy after this call.
+ *
+ * This function does NOT block for 3 seconds — it starts the bridge and
+ * does a single quick health check. The bridge takes ~2-5s to boot, so
+ * the first request may fail; the frontend retries automatically.
  */
 function local_hermesagent_ensure_bridge_running(int $bridge_port): bool {
     global $CFG;
@@ -102,39 +104,44 @@ function local_hermesagent_ensure_bridge_running(int $bridge_port): bool {
     $resp = curl_exec($ch);
     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if ($resp !== false && $http_code === 200) {
+    if ($http_code === 200) {
         return true;
     }
 
-    // Slow path: start the bridge
+    // Check if already starting (pidfile exists and process alive)
     $hermes_home = '/var/www/moodledata/.hermes';
-    $bridge_script = $CFG->dirroot . '/local/hermesagent/classes/bridge/acp_bridge.py';
+    $pidfile = "$hermes_home/pids/acp-bridge.pid";
+    if (file_exists($pidfile)) {
+        $existing_pid = trim(file_get_contents($pidfile));
+        if ($existing_pid && posix_kill(intval($existing_pid), 0)) {
+            // Bridge is booting — don't block, let the user retry
+            return false;
+        }
+        // Stale pidfile
+        @unlink($pidfile);
+    }
 
-    // Write DB credentials
-    $cred_dir = "$hermes_home/.credentials";
-    @mkdir($cred_dir, 0700, true);
-    $cred_file = "$cred_dir/db.env";
-    $cred_contents = sprintf(
-        "MOODLE_DB_HOST=%s\nMOODLE_DB_NAME=%s\nMOODLE_DB_USER=%s\nMOODLE_DB_PASS=%s\n",
-        escapeshellarg($CFG->dbhost),
-        escapeshellarg($CFG->dbname),
-        escapeshellarg($CFG->dbuser),
-        escapeshellarg($CFG->dbpass)
-    );
-    file_put_contents($cred_file, $cred_contents, LOCK_EX);
-    chmod($cred_file, 0600);
-
-    $cmd = sprintf(
-        'HERMES_HOME=%s MOODLE_DB_CREDENTIALS_FILE=%s nohup %s/venv/bin/python %s >> /var/www/moodledata/.hermes/logs/bridge.log 2>&1 & echo $!',
-        escapeshellarg($hermes_home),
-        escapeshellarg($cred_file),
-        $hermes_home,
-        escapeshellarg($bridge_script)
-    );
+    // Slow path: start the bridge via the control script
+    $control_script = $CFG->dirroot . '/local/hermesagent/hermes-bridge-control.sh';
+    $cmd = escapeshellarg($control_script) . ' start 2>&1';
     exec($cmd, $output, $ret);
-    error_log("HERMES [AUTO-START]: $cmd pid=" . trim(implode("\n", $output)));
+    error_log('HERMES [AUTO-START]: launching bridge via control script: ' . implode(' ', $output));
 
-    return false; // caller sleeps then retries
+    // Give it a brief moment, then check (don't block for 3s)
+    sleep(1);
+    $ch = curl_init("http://127.0.0.1:$bridge_port/health");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 2]);
+    $resp = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($http_code === 200) {
+        error_log('HERMES [AUTO-START]: bridge healthy after 1s');
+        return true;
+    }
+
+    // Bridge is still booting — don't block, let user retry
+    error_log('HERMES [AUTO-START]: bridge still booting, user should retry in ~5s');
+    return false;
 }
 
 /**
@@ -142,19 +149,24 @@ function local_hermesagent_ensure_bridge_running(int $bridge_port): bool {
  * Returns true if healthy after restart.
  */
 function local_hermesagent_restart_bridge(int $bridge_port): bool {
-    $hermes_home = '/var/www/moodledata/.hermes';
+    global $CFG;
 
-    // Kill existing bridge + orphaned acp
-    exec("pkill -f acp_bridge.py 2>/dev/null || true");
-    exec("pkill -f 'hermes acp' 2>/dev/null || true");
-    sleep(1);
+    $control_script = $CFG->dirroot . '/local/hermesagent/hermes-bridge-control.sh';
+    $cmd = escapeshellarg($control_script) . ' restart 2>&1';
+    exec($cmd, $output, $ret);
+    sleep(2);
 
-    // Start fresh (reuse the same logic)
-    return local_hermesagent_ensure_bridge_running($bridge_port);
+    // Health check
+    $ch = curl_init("http://127.0.0.1:$bridge_port/health");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 3]);
+    $resp = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($http_code === 200);
 }
 
 /**
- * Register admin navigation — only visible to site admins
+ * Register admin navigation — only visible to users with capability
  */
 function local_hermesagent_extend_navigation_navigation(settings_navigation $nav, context_system $context) {
     if (!has_capability('local/hermesagent:use', $context)) {
@@ -175,4 +187,3 @@ function local_hermesagent_extend_navigation_navigation(settings_navigation $nav
         $adminnode->add_node($node);
     }
 }
-

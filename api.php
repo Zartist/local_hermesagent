@@ -44,8 +44,10 @@ $PAGE->set_context(context_system::instance());
 
 // CSRF protection: validate sesskey for POST actions.
 // Stream is GET-only (read-only SSE) so we skip sesskey to avoid Moodle's single-use conflict.
+// Abort is a lightweight signal, no sesskey needed.
+// Status is read-only health check, no sesskey needed.
 $action = required_param('action', PARAM_ALPHA);
-if ($action !== 'stream') {
+if ($action !== 'stream' && $action !== 'abort' && $action !== 'status') {
     require_sesskey();
 }
 
@@ -71,6 +73,9 @@ switch ($action) {
         break;
     case 'tool_response':
         api_tool_response();
+        break;
+    case 'abort':
+        api_abort_stream();
         break;
     default:
         send_json_response(['error' => 'Unknown action']);
@@ -150,9 +155,13 @@ function api_stream_response(): void {
     $bridge_url = "http://127.0.0.1:$bridge_port";
 
     // Lazy-start: if bridge isn't responding, start it now (transparent to user)
+    // ensure_bridge_running polls until healthy or times out (~30s)
     if (!local_hermesagent_ensure_bridge_running($bridge_port)) {
-        // Give it a moment to boot
-        sleep(2);
+        error_log("HERMES [API]: bridge failed to start, returning error");
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        echo "event: error\ndata: " . json_encode(['error' => 'Bridge failed to start. Please try again shortly.']) . "\n\n";
+        die();
     }
 
     // Get the last user message from conversation history
@@ -389,6 +398,36 @@ function api_tool_response(): void {
         'status' => 'ok',
         'messageid' => $messageid,
         'approved' => $approved,
+    ]);
+}
+
+/**
+ * Abort the current streaming response
+ */
+function api_abort_stream(): void {
+    $conversationid = required_param('conversationid', PARAM_INT);
+    
+    $bridge_port = local_hermesagent_get_bridge_port();
+    $bridge_url = "http://127.0.0.1:$bridge_port";
+    
+    // Signal the bridge to abort this conversation's stream
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $bridge_url . '/session/abort',
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode(['conversationid' => $conversationid]),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 5,
+    ]);
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    send_json_response([
+        'status' => 'ok',
+        'http_code' => $http_code,
+        'bridge_response' => json_decode($response, true),
     ]);
 }
 

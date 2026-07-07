@@ -72,6 +72,13 @@ class ACPProcess:
         self._next_id = 0
         self._lock = threading.Lock()
         self._sessions = {}  # moodle_session_id -> acp_session_id
+        # Abort tracking: moodle_conv_id -> event to set when abort requested
+        self._abort_events = {}  # moodle_conv_id -> threading.Event()
+        # Prompt serialization: hermes acp is a single stdio process that can
+        # only handle one prompt at a time. Without this lock, concurrent
+        # prompts would both read from the shared inbox queue and steal each
+        # other's session/update chunks.
+        self._prompt_lock = threading.Lock()
 
     def start(self):
         """Start the hermes acp subprocess."""
@@ -429,10 +436,24 @@ def startup():
 
 @app.get("/health")
 def health():
-    """Health check."""
+    """Health check — does NOT block on the prompt lock."""
     if acp.proc and acp.proc.poll() is None:
         return {"status": "ok", "acp_running": True}
     return {"status": "degraded", "acp_running": False}
+
+
+@app.get("/status")
+def status():
+    """Detailed status including prompt lock state."""
+    lock_locked = acp._prompt_lock.locked()
+    acp_alive = acp.proc is not None and acp.proc.poll() is None
+    return {
+        "status": "ok" if acp_alive else "degraded",
+        "acp_running": acp_alive,
+        "prompt_in_progress": lock_locked,
+        "sessions": len(acp._sessions),
+        "pid": os.getpid(),
+    }
 
 
 @app.post("/session/new")
@@ -486,9 +507,30 @@ async def session_prompt(request: Request):
 
     log.info("Sending full prompt (len=%d) to ACP session %s", len(full_prompt), acp_session_id)
 
+    # Create abort event for this conversation
+    abort_event = threading.Event()
+    acp._abort_events[conversationid] = abort_event
+
     def event_generator():
+        aborted = False
+        # Serialize prompts: hermes acp is a single stdio process. Only one
+        # prompt can read from the shared inbox at a time, or chunks mix.
+        # The lock is released when the generator is exhausted or GC'd.
+        acquired = acp._prompt_lock.acquire(blocking=True, timeout=300)
+        if not acquired:
+            data = {"type": "error", "error": "Another request is in progress (timeout waiting for lock)"}
+            yield f"event: error\\ndata: {json.dumps(data)}\\n\\n"
+            return
         try:
             for event in acp.send_prompt_streaming(acp_session_id, full_prompt):
+                # Check if user requested abort
+                if abort_event.is_set() and not aborted:
+                    aborted = True
+                    log.info("User requested abort for conversation %s", conversationid)
+                    data = {"type": "aborted", "message": "Response stopped by user"}
+                    yield f"event: aborted\ndata: {json.dumps(data)}\n\n"
+                    return
+
                 event_type = event.get("type", "unknown")
                 log.info("Event type: %s", event_type)
 
@@ -558,7 +600,9 @@ async def session_prompt(request: Request):
         except Exception as e:
             log.error("Event generator error: %s", e, exc_info=True)
             data = {"type": "error", "error": str(e)}
-            yield f"data: {json.dumps(data)}\n\n"
+            yield f"data: {json.dumps(data)}\\n\\n"
+        finally:
+            acp._prompt_lock.release()
 
     return StreamingResponse(
         event_generator(),
@@ -578,6 +622,22 @@ def list_sessions():
         "sessions": acp._sessions,
         "acp_running": acp.proc is not None and acp.proc.poll() is None,
     }
+
+
+@app.post("/session/abort")
+async def session_abort(request: Request):
+    """Abort the current streaming response for a conversation."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    conversationid = body.get("conversationid", "")
+    if conversationid in acp._abort_events:
+        acp._abort_events[conversationid].set()
+        log.info("Abort signal sent for conversation %s", conversationid)
+        return {"status": "ok", "aborted": True}
+    return {"status": "ok", "aborted": False, "message": "No active stream for this conversation"}
 
 
 if __name__ == "__main__":

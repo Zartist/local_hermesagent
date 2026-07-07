@@ -133,12 +133,19 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     };
 
     /**
-     * Send a message
+     * Send a message (or handle slash commands)
      */
     var sendMessage = function() {
         var input = $('#hermes-message-input');
         var message = input.val().trim();
         if (!message || isStreaming) return;
+
+        // Slash command handling
+        if (message.startsWith('/')) {
+            input.val('');
+            handleSlashCommand(message);
+            return;
+        }
 
         // Store message BEFORE clearing
         input.data('lastmessage', message);
@@ -147,6 +154,63 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
 
         // Start streaming response
         streamResponse(config.conversationid);
+    };
+
+    /**
+     * Handle slash commands
+     */
+    var handleSlashCommand = function(cmd) {
+        var parts = cmd.trim().split(/\s+/);
+        var command = parts[0].toLowerCase();
+
+        switch (command) {
+            case '/stop':
+                stopStreaming();
+                break;
+            case '/new':
+                window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?action=new';
+                break;
+            case '/clear':
+                $('#hermes-chat-area').empty();
+                addSystemMessage('Conversation view cleared.');
+                break;
+            case '/status':
+                checkBridgeStatus();
+                break;
+            case '/help':
+                addSystemMessage('Slash commands: /stop (abort response), /new (new conversation), /clear (clear view), /status (bridge health), /help (this message)');
+                break;
+            default:
+                addSystemMessage('Unknown command: ' + escapeHtml(command) + ' — type /help for available commands.');
+                break;
+        }
+    };
+
+    /**
+     * Stop streaming: close EventSource and signal bridge to abort
+     */
+    var eventSourceRef = null;  // Global reference so /stop can close it
+
+    var stopStreaming = function() {
+        if (eventSourceRef) {
+            eventSourceRef.close();
+            eventSourceRef = null;
+        }
+        isStreaming = false;
+        $('#hermes-send-btn').prop('disabled', false);
+        $('.hermes-spinner').remove();
+        $('.hermes-streaming').removeClass('hermes-streaming');
+
+        // Signal bridge to abort
+        $.ajax({
+            url: config.api_url + '?action=abort&conversationid=' + config.conversationid,
+            type: 'POST',
+            timeout: 3000,
+        }).fail(function() {
+            // Best effort — already closed client-side
+        });
+
+        addSystemMessage('Response stopped.');
     };
 
     /**
@@ -215,6 +279,8 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             var eventSource = new EventSource(
                 M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream&conversationid=' + conversationid + '&sesskey=' + config.sesskey
             );
+            // Track reference so /stop can close it
+            eventSourceRef = eventSource;
 
         // Handle the 'message' event from api.php SSE stream
         eventSource.addEventListener('message', function(e) {
@@ -293,7 +359,8 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
 
         eventSource.addEventListener('done', function(e) {
-console.log('[Hermes-SSE] done event received');
+            eventSourceRef = null;
+            console.log('[Hermes-SSE] done event received');
             eventSource.close();
             isStreaming = false;
             $('#hermes-send-btn').prop('disabled', false);
@@ -313,6 +380,17 @@ console.log('[Hermes-SSE] done event received');
             savePromises[0].catch(function(ex) {
                 console.error('[Hermes] Failed to save assistant response:', ex);
             });
+        });
+
+        eventSource.addEventListener('aborted', function(e) {
+            eventSourceRef = null;
+            console.log('[Hermes-SSE] aborted event received');
+            eventSource.close();
+            isStreaming = false;
+            $('#hermes-send-btn').prop('disabled', false);
+            $('#' + currentSpinnerId).remove();
+            messageEl.removeClass('hermes-streaming');
+            addSystemMessage('Response stopped by user.');
         });
         }).catch(function(ex) {
             console.error('[Hermes] streamResponse error:', ex);
@@ -763,6 +841,43 @@ console.log('[Hermes-SSE] done event received');
             var chatArea = document.getElementById('hermes-chat-area');
             chatArea.scrollTop = chatArea.scrollHeight;
         }
+    };
+
+    /**
+     * Add a system message (for slash command feedback)
+     */
+    var addSystemMessage = function(text) {
+        var html = '<div class="hermes-system-message">';
+        html += '<div class="hermes-system-icon">⚙</div>';
+        html += '<div class="hermes-system-content">' + escapeHtml(text) + '</div>';
+        html += '</div>';
+        var $el = $(html);
+        $('#hermes-chat-area').append($el);
+        scrollToEnd();
+        return $el;
+    };
+
+    /**
+     * Check bridge status and display result
+     */
+    var checkBridgeStatus = function() {
+        var $statusMsg = addSystemMessage('Checking bridge status...');
+        $.ajax({
+            url: config.api_url + '?action=status&conversationid=' + config.conversationid,
+            type: 'GET',
+            timeout: 5000,
+            dataType: 'json',
+            success: function(res) {
+                var detail = 'Bridge: ' + (res.status || 'unknown');
+                if (res.port) {
+                    detail += ' (port ' + res.port + ')';
+                }
+                $statusMsg.find('.hermes-system-content').text(detail);
+            },
+            error: function() {
+                $statusMsg.find('.hermes-system-content').text('Bridge: unreachable (not responding)');
+            }
+        });
     };
 
     return {
