@@ -1,35 +1,21 @@
 # local_hermesagent — Developer Documentation
 
-**Version:** 0.3.0 (2026061304) | **Moodle:** 5.0+ | **License:** GPL v3+
+**Version:** 0.3.8 (2026070701) | **Moodle:** 5.0+ | **License:** GPL v3+
 
 ---
 
 ## What Is This?
 
-`local_hermesagent` is a Moodle plugin that connects the Moodle LMS to the [Hermes AI Agent framework](https://github.com/nousresearch/hermes). It provides:
+`local_hermesagent` is a Moodle plugin that connects the Moodle LMS to the [Hermes AI Agent framework](https://github.com/NousResearch/hermes-agent). It provides:
 
 - An in-Moodle chat interface with real-time streaming responses
 - Math equation rendering via MathJax
 - Conversation management (create, rename, delete, search)
 - Integration with Moodle's auth, privacy, and user management systems
-- A terminal interface for AI-assisted command execution
+- A terminal interface for non-interactive Hermes CLI commands
+- A dashboard proxy for the Hermes web UI (config, sessions, MCP, tools)
 
 It uses the **ACP (Agent Communication Protocol)** bridge to communicate with a local Hermes instance, providing budget-controlled, secure AI access.
-
-## Why Build This?
-
-- Educational institutions want AI within their controlled LMS environment
-- Existing Moodle AI plugins are either too simple (single-call completions) or require external hosting
-- This plugin leverages the full Hermes agent ecosystem (tools, plugins, MCP servers) within Moodle
-- Provides institutional cost controls via the Hermes budget system
-
-## System Requirements
-
-- Moodle 5.x (tested on 5.0+)
-- Python 3.12+ with Hermes CLI installed
-- PHP 8.1+ with cURL, JSON extensions
-- MathJax v4 (CDN: cdn.jsdelivr.net)
-- For the terminal feature: access to a Hermes-managed environment
 
 ## Architecture
 
@@ -38,6 +24,8 @@ Moodle Browser ←→ chat.php ←→ api.php ←→ ACP Bridge (localhost:9118)
                      │              │
                 conversation   web service
                    table       calls
+
+Moodle Browser ←→ dashboard.php ←→ Hermes Dashboard (localhost:9119) ←→ config, sessions, MCP UI
 ```
 
 ### Detailed Data Flow
@@ -50,30 +38,18 @@ Browser (chat.js AMD module)
   v
 api.php (Moodle PHP)
   │
-  │  cURL POST → 127.0.0.1:<bridge_port>/v1/chat/completions
+  │  cURL POST → 127.0.0.1:<bridge_port>/session/prompt
   v
 acp_bridge.py (FastAPI + uvicorn, Python 3.12)
   │
-  │  stdio JSON-RPC
+  │  stdio JSON-RPC (prompt serialization lock ensures one prompt at a time)
   v
-hermes acp subprocess (one per conversation)
+hermes acp subprocess (shared across conversations)
   │
-  │  HTTP → LLM provider (OpenAI, Anthropic, etc.)
+  │  HTTP → LLM provider (OpenAI, Anthropic, custom, etc.)
   v
 LLM API
 ```
-
-### Sending a Message (Step by Step)
-
-1. User types message in `chat.php`, clicks Send.
-2. `chat.js` calls Moodle web service `local_hermesagent_send_message` via `core/ajax`.
-3. PHP saves the user message to `local_hermesagent_messages`.
-4. `chat.js` opens an `EventSource` to `api.php?action=stream`.
-5. `api.php` fetches full conversation history, calls ACP Bridge via cURL.
-6. `acp_bridge.py` forwards to the `hermes acp` subprocess via stdio JSON-RPC.
-7. LLM tokens stream back through ACP → Bridge → api.php → SSE → `chat.js`.
-8. `chat.js` renders markdown + math in real-time as deltas arrive.
-9. On `done`, the full raw markdown is saved to DB via `save_assistant_response` web service.
 
 ### Key Components
 
@@ -81,15 +57,18 @@ LLM API
 |------|------|
 | `chat.php` | Main chat UI (sidebar + message area + input + tool modal) |
 | `api.php` | SSE streaming proxy + JSON API endpoints |
+| `dashboard.php` | Reverse proxy for the Hermes web dashboard (port 9119) |
 | `amd/src/chat.js` | Client-side chat logic, markdown/math rendering, SSE handling |
 | `amd/src/marked.js` | AMD wrapper for marked.js (handles Moodle's define.amd conflict) |
-| `classes/bridge/acp_bridge.py` | FastAPI HTTP bridge to `hermes acp` subprocesses |
+| `classes/bridge/acp_bridge.py` | FastAPI HTTP bridge to `hermes acp` subprocess (prompt serialization lock, `/health`, `/status` endpoints) |
 | `classes/external/chat_api.php` | Moodle external web service API (7 methods) |
-| `local_hermesagent_settings.php` | Bridge start/stop handler |
-| `terminal.php` | In-browser Hermes CLI terminal |
-| `exec.php` | Command execution backend for terminal |
-| `classes/tool/*.py` | Hermes tools (moodle_admin, moodle_schema, moodle_sql, skill_backup) |
-| `scripts/bootstrap.sh` | Standalone Python + hermes-agent installer |
+| `settings.php` | Admin settings page with Start/Stop/Restart buttons (health polling) |
+| `settings_action.php` | Handles Update & Bootstrap action (calls `bootstrap.sh`) |
+| `hermes-bridge-control.sh` | Shell script for bridge process management (start/stop/restart/status) |
+| `terminal.php` | In-browser Hermes CLI terminal (non-interactive commands only) |
+| `exec.php` | Command execution backend for terminal (sets HERMES_HOME + PATH) |
+| `scripts/bootstrap.sh` | Standalone Python + hermes-agent installer (idempotent) |
+| `scripts/moodle_db_mcp.py` | MCP server for Moodle database access |
 
 ---
 
@@ -98,14 +77,17 @@ LLM API
 ```
 local/hermesagent/
 ├── chat.php                          # Chat interface page
-├── terminal.php                      # CLI terminal page
+├── terminal.php                      # CLI terminal page (non-interactive commands)
+├── dashboard.php                     # Hermes Dashboard reverse proxy (port 9119)
 ├── api.php                           # API proxy (SSE + JSON)
-├── exec.php                          # Terminal command executor
-├── local_hermesagent_settings.php    # Bridge start/stop handler
-├── settings.php                      # Admin settings page
-├── lib.php                           # Core helper functions
+├── exec.php                          # Terminal command executor (sets PATH + HERMES_HOME)
+├── settings.php                      # Admin settings page (Start/Stop/Restart + health polling)
+├── settings_action.php               # Handles Update & Bootstrap action
+├── hermes-bridge-control.sh          # Bridge process manager (start/stop/restart/status)
+├── lib.php                           # Core helper functions (health check, bridge start)
 ├── version.php                       # Plugin version + requirements
 ├── README.txt                        # Moodle Plugin Directory README
+├── CHANGES.md                        # Changelog
 ├── lang/
 │   └── en/
 │       └── local_hermesagent.php     # Language strings
@@ -121,7 +103,7 @@ local/hermesagent/
 │   ├── privacy/
 │   │   └── provider.php              # GDPR privacy provider
 │   ├── bridge/
-│   │   └── acp_bridge.py             # ACP bridge HTTP server
+│   │   └── acp_bridge.py             # ACP bridge HTTP server (FastAPI + uvicorn)
 │   └── tool/
 │       ├── moodle_admin.py           # Read-only admin queries
 │       ├── moodle_schema.py          # Database schema explorer
@@ -143,10 +125,14 @@ local/hermesagent/
 │   ├── terminal.css                  # Terminal styles
 │   └── terminal.js                   # Terminal inline JS
 ├── scripts/
-│   ├── bootstrap.sh                  # Python + Hermes installer
+│   ├── bootstrap.sh                  # Python + Hermes installer (idempotent)
+│   ├── moodle_db_mcp.py              # MCP server for Moodle DB access
 │   └── install_plugins.php           # CLI plugin installer
 └── docs/
-    └── README.md                     # This file
+    ├── README.md                     # Developer documentation (this file)
+    ├── USER_GUIDE.md                 # Administrator guide
+    ├── SCHEMA.md                     # Database schema reference
+    └── SUBMISSION.md                 # Plugin directory submission checklist
 ```
 
 ---
@@ -233,12 +219,11 @@ configurable port (default: 9118).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check. Returns session count and Hermes availability. |
-| `/session/create` | POST | Spawn a new `hermes acp` subprocess. Returns `{sid, status}`. |
-| `/session/{sid}/send` | POST | Send message to ACP session. Returns SSE stream of tokens. |
-| `/session/{sid}/tool_call` | POST | Execute a tool call on the session. Returns JSON response. |
-| `/session/{sid}/info` | GET | Session info (PID, alive status). |
-| `/session/{sid}` | DELETE | Kill the ACP subprocess. |
+| `/health` | GET | Quick health check. Returns `{"status":"ok","acp_running":true}`. Does NOT block on the prompt lock. |
+| `/status` | GET | Detailed status. Returns `{"status","acp_running","prompt_in_progress","sessions","pid"}`. |
+| `/session/new` | POST | Create a new ACP session. Body: `{"conversationid":"..."}`. Returns `{"session_id","moodle_conv_id"}`. |
+| `/session/prompt` | POST | Send a prompt to a session. Body: `{"conversationid":"...","message":"..."}`. Returns SSE stream. Acquires prompt serialization lock (300s timeout). |
+| `/session/abort` | POST | Abort a running prompt. Body: `{"conversationid":"..."}`. |
 
 #### Environment Variables
 

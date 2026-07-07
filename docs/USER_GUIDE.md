@@ -8,13 +8,15 @@
 
 Large language models (LLMs) are powerful tools, but accessing them outside your Learning Management System breaks the educational workflow. Students and teachers need AI assistance that integrates seamlessly into the platform they already use every day. At the same time, institutions need to control costs, enforce security policies, and maintain data governance standards like GDPR.
 
-The **Hermes Agent** plugin bridges Moodle with the [Hermes AI Agent framework](https://github.com/nousresearch/hermes), giving you AI-powered assistance directly inside your LMS. It provides:
+The **Hermes Agent** plugin bridges Moodle with the [Hermes AI Agent framework](https://github.com/NousResearch/hermes-agent), giving you AI-powered assistance directly inside your LMS. It provides:
 
 - **Integrated workflow** — AI assistance without leaving Moodle.
 - **Cost control** — Administrators configure per-user API budget limits, so usage stays within institutional budgets.
 - **Security** — During the pilot phase, access is restricted to administrators, giving institutions full control over who interacts with the AI.
 - **Data governance** — Conversations are stored in the Moodle database with full GDPR-compliant export and deletion capabilities.
 - **Persistent skills** — The AI learns from your institutional context and retains useful skills across sessions.
+- **Dashboard** — A full web UI for managing Hermes config, sessions, MCP servers, and tools.
+- **Terminal** — Run non-interactive Hermes CLI commands directly from the browser.
 
 ---
 
@@ -97,6 +99,63 @@ Once you've been chatting for a while, you'll want to organize your conversation
 - **Rename** — Click the **pencil icon** on any conversation to give it a descriptive name (e.g., "Physics Lesson Planning" instead of "New Conversation").
 - **Delete** — Click the **trash icon** to permanently remove a conversation and all its messages.
 - **Search** — Use the **sidebar search** field to quickly find past conversations by name or content.
+
+---
+
+## Admin Settings Page
+
+Navigate to **Site administration > Plugins > Local plugins > Hermes Agent** to manage the plugin.
+
+### ACP Bridge Controls
+
+The ACP Bridge is the background process that connects Moodle to the Hermes AI agent. It auto-starts when you send the first chat message, but you can also control it manually:
+
+- **Start ACP** (green) — Start the bridge if it's stopped. Takes ~10 seconds to boot.
+- **Restart ACP** (yellow) — Restart the bridge. Useful after syncing plugin updates or changing Hermes config. Takes ~10 seconds.
+- **Stop ACP** (red) — Stop the bridge. The bridge will NOT auto-start on the next chat; you must click Start or send a chat message.
+- **Update & Bootstrap** (blue) — Install or update the Hermes Python environment, bridge scripts, and MCP servers. Safe to run multiple times (idempotent).
+- **Dashboard** (primary) — Open the Hermes web dashboard in a new tab.
+
+### Dashboard
+
+The dashboard provides a full web UI for Hermes configuration, including:
+
+- View and edit model/provider settings
+- Browse and manage chat sessions
+- Configure MCP servers
+- Enable/disable toolsets
+- View gateway status
+
+It runs on port 9119 inside the pod and is proxied through Moodle at `/local/hermesagent/dashboard.php/`. The dashboard auto-starts on first access.
+
+### Terminal
+
+The terminal page lets you run non-interactive Hermes CLI commands from the browser. The environment is pre-configured with `HERMES_HOME` and the venv in `PATH`, so you can just type `hermes`.
+
+**Supported commands:**
+
+| Command | Example |
+|---------|---------|
+| `hermes --version` | Show installed version |
+| `hermes config` | View current configuration |
+| `hermes config set <key> <value>` | Set a config value (e.g., `hermes config set model.default /models/GLM-5.2-FP8`) |
+| `hermes mcp list` | List configured MCP servers |
+| `hermes tools list` | List available toolsets |
+| `hermes acp --check` | Verify ACP dependencies |
+| `hermes status` | Show component status |
+| `hermes skills list` | List installed skills |
+| `hermes sessions list` | List recent sessions |
+| `hermes chat -q "question"` | Single non-interactive query |
+| `hermes update --yes` | Update Hermes to latest version |
+
+**Not supported** (require interactive TTY):
+
+- `hermes chat` (interactive TUI — use the chat page instead)
+- `hermes setup` (interactive wizard)
+- `hermes config edit` (opens vi)
+- `hermes model` (interactive curses picker — use `hermes config set` instead)
+
+Quick-action buttons are provided above the terminal input for common commands.
 
 ---
 
