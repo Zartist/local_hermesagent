@@ -163,15 +163,12 @@ if ($hassiteconfig) {
     }
     $gw_html .= '</table>';
     $gw_html .= '<div class="mt-2">';
-    if ($gw_has_platform || $gw_running) {
-        if ($gw_running) {
-            $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=restart&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-warning">Restart Gateway</a> ';
-            $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=stop&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-danger">Stop Gateway</a> ';
-        } else {
-            $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start Gateway</a> ';
-        }
+    if ($gw_running) {
+        $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=restart&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-warning">Restart Gateway</a> ';
+        $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=stop&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-danger">Stop Gateway</a> ';
+    } else {
+        $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start Gateway</a> ';
     }
-    $gw_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/dashboard.php/" target="_blank" class="btn btn-sm btn-info">Configure via Dashboard</a> ';
     $gw_html .= '</div>';
     $gw_html .= '</div>';
 
