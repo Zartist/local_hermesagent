@@ -63,6 +63,7 @@ if ($hassiteconfig) {
     $links_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/chat.php?action=new" class="btn btn-primary" target="_blank"><i class="icon fa fa-comments"></i> Chat</a> ';
     $links_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/terminal.php" class="btn btn-secondary"><i class="icon fa fa-terminal"></i> Terminal</a> ';
     $links_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/dashboard.php/" target="_blank" class="btn btn-info"><i class="icon fa fa-tachometer"></i> Dashboard</a> ';
+    $links_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/settings_action.php?action=update&sesskey=' . sesskey() . '" class="btn btn-warning"><i class="icon fa fa-download"></i> Update &amp; Bootstrap</a> ';
     $links_html .= '<a href="' . $hermes_docs . '" target="_blank" class="btn btn-link"><i class="icon fa fa-book"></i> Docs</a>';
     $links_html .= '</div>';
     $settings->add(new admin_setting_heading('hermesagent_links', get_string('quick_links', 'local_hermesagent'), $links_html));
@@ -107,7 +108,6 @@ if ($hassiteconfig) {
     } else {
         $bridge_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start</a> ';
     }
-    $bridge_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/settings_action.php?action=update&sesskey=' . sesskey() . '" class="btn btn-sm btn-info">Update &amp; Bootstrap</a>';
     $bridge_html .= '</div>';
     $bridge_html .= '</div>';
     $settings->add(new admin_setting_heading('hermesagent_bridge', get_string('acp_bridge', 'local_hermesagent'), $bridge_html));
@@ -167,7 +167,6 @@ if ($hassiteconfig) {
     } else {
         $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start</a> ';
     }
-    $gw_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/dashboard.php/" target="_blank" class="btn btn-sm btn-info">Dashboard</a>';
     $gw_html .= '</div>';
     $gw_html .= '</div>';
     $settings->add(new admin_setting_heading('hermesagent_gateway', get_string('gateway', 'local_hermesagent'), $gw_html));
