@@ -79,6 +79,23 @@
     margin-bottom: 16px;
 }
 
+/* Quick action buttons */
+.hermes-quick-actions {
+    margin-bottom: 12px;
+    padding: 8px 0;
+}
+
+.hermes-quick-label {
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+.hermes-quick-btn {
+    margin: 2px 4px 2px 0;
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 11px;
+}
+
 /* Terminal link on settings page */
 .herms-terminal-link {
     padding: 16px;

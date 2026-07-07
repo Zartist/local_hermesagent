@@ -1,4 +1,14 @@
 <?php
+/**
+ * Execute a shell command on the pod as www-data.
+ * Commands run with HERMES_HOME and venv/bin in PATH so `hermes` works.
+ *
+ * Two modes:
+ *   1. POST with 'command' param → start a background command, return cmd_id
+ *   2. GET with 'poll' param → poll output of a running/finished command
+ *   3. GET with 'check' param → quick check if hermes is installed
+ */
+
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
 
@@ -10,6 +20,7 @@ $venv_bin = "$hermes_home/venv/bin";
 $log_dir = "/tmp/hermes_terminal";
 @mkdir($log_dir, 0700, true);
 
+// Quick check: is hermes installed?
 $check = optional_param('check', 0, PARAM_INT);
 if ($check) {
     header('Content-Type: application/json');
@@ -17,6 +28,7 @@ if ($check) {
     exit;
 }
 
+// Poll mode: check output of a running command
 $poll_id = optional_param('poll', '', PARAM_ALPHANUM);
 if ($poll_id) {
     header('Content-Type: application/json');
@@ -32,7 +44,6 @@ if ($poll_id) {
     $running = false;
     $exit_code = null;
 
-    // Exitfile wins - command definitely done
     if (file_exists($exitfile)) {
         $exit_code = (int)trim(file_get_contents($exitfile));
         $running = false;
@@ -44,7 +55,6 @@ if ($poll_id) {
             $running = false;
         }
     } else {
-        // No PID file, no exit file - brief startup window
         $running = true;
     }
 
@@ -70,12 +80,19 @@ if ($poll_id) {
     exit;
 }
 
+// Execute mode: start a command
 $command = required_param('command', PARAM_RAW);
 confirm_sesskey();
 
 $hermes_installed = is_dir($venv_bin);
-$base_path = getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
-$env_path = $hermes_installed ? "$venv_bin:$base_path" : $base_path;
+
+// Build the environment prefix: set HERMES_HOME and add venv to PATH
+// so `hermes` is directly available without typing the full path.
+$env_prefix = '';
+if ($hermes_installed) {
+    $env_prefix = "export HERMES_HOME='$hermes_home'\n";
+    $env_prefix .= "export PATH='$venv_bin:$PATH'\n";
+}
 
 $cmd_id = md5(uniqid((string)getmypid(), true));
 $logfile = "$log_dir/{$cmd_id}.log";
@@ -88,18 +105,19 @@ $scriptfile = "$log_dir/{$cmd_id}.sh";
 @unlink($exitfile);
 @unlink($scriptfile);
 
-// Script writes its own PID, runs command, writes exit code, deletes itself
-$script = '#!/bin/sh' . "\n";
-$script .= 'echo $$ > "' . $pidfile . '"\n';
+// Script writes its own PID, sets env, runs command, writes exit code, deletes itself
+$script = "#!/bin/sh\n";
+$script .= "echo \$\$ > '$pidfile'\n";
+$script .= $env_prefix;
 $script .= "cd /var/www\n";
 $script .= $command . "\n";
-$script .= 'RC=$?' . "\n";
-$script .= "echo \$RC > '" . $exitfile . "'\n";
-$script .= "rm -f '" . $scriptfile . "'\n";
+$script .= "RC=$?\n";
+$script .= "echo \$RC > '$exitfile'\n";
+$script .= "rm -f '$scriptfile'\n";
 file_put_contents($scriptfile, $script);
 chmod($scriptfile, 0700);
 
-// Execute - script still on disk, will delete itself
+// Execute in background
 $cmd = "sh '" . $scriptfile . "' > '" . $logfile . "' 2>&1 &";
 exec($cmd);
 

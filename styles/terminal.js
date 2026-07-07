@@ -142,9 +142,24 @@
 
     // Welcome
     append('Hermes Terminal');
-    append('HERMES_HOME=/var/www/moodledata/.hermes');
-    append("Type 'hermes --help' to get started.");
+    if (hermesInstalled) {
+        append('Environment: HERMES_HOME=/var/www/moodledata/.hermes (venv in PATH)');
+    } else {
+        append('Hermes not installed. Run Update & Bootstrap from settings page.');
+    }
+    append('Quick actions available above. Type commands below.');
     append('');
+
+    // Quick action buttons
+    document.querySelectorAll('.hermes-quick-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var cmd = btn.dataset.cmd;
+            if (cmd && !activeCommand) {
+                inputEl.value = cmd;
+                inputEl.focus();
+            }
+        });
+    });
 
     // Input handler
     inputEl.addEventListener('keydown', function(e) {
