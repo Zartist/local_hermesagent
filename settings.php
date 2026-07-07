@@ -171,7 +171,7 @@ if ($hassiteconfig) {
         get_string('gateway_matrix_user_id_desc', 'local_hermesagent'),
         '', PARAM_RAW));
 
-    $settings->add(new admin_setting_configpassword('local_hermesagent/matrix_access_token',
+    $settings->add(new admin_setting_configpasswordunmask('local_hermesagent/matrix_access_token',
         get_string('gateway_matrix_access_token', 'local_hermesagent'),
         get_string('gateway_matrix_access_token_desc', 'local_hermesagent'),
         ''));
