@@ -9,22 +9,25 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-#### Messaging Gateway (Matrix/Element)
+#### Messaging Gateway (multi-platform)
 - **`hermes-gateway-control.sh`** — process manager for the Hermes gateway
   (start/stop/restart/status via nohup + PID file). The gateway connects
   Hermes to messaging platforms so you can chat with the AI from Element,
-  Telegram, or other messaging apps.
-- **Matrix config fields** on the settings page:
-  - Homeserver URL (e.g. `https://matrix.org`)
-  - User ID (bot account, e.g. `@hermes-bot:matrix.org`)
-  - Access token (password-type field, from Element settings)
-  - Allowed room IDs (comma-separated whitelist)
-  - Device ID (optional, for E2EE persistence)
+  Telegram, Discord, Signal, and 15+ other apps.
+- **Generic `.env` textarea** on the settings page — paste any platform's
+  environment variables (one per line). Supports all Hermes gateway
+  platforms: Matrix, Telegram, Discord, Signal, Mattermost, IRC, Email,
+  Line, Feishu, DingTalk, Google Chat, QQ, ntfy, BlueBubbles, and more.
+  Written to `$HERMES_HOME/.env` (0600) on Start/Restart.
+- **"Configure via Dashboard" button** — opens the Hermes web dashboard
+  which has a guided setup UI for each messaging platform. This is the
+  recommended way to configure platforms.
 - **Gateway status panel** with Start/Stop/Restart buttons and last log
-  line display. Buttons only appear when Matrix config is present.
-- **`local_hermesagent_write_gateway_env()`** — writes Matrix config to
-  `$HERMES_HOME/.env` (with 0600 permissions) before gateway start.
-  Removes old `MATRIX_` lines on each write to avoid duplicates.
+  line display. Detects any platform config (not just Matrix) by checking
+  for known env var prefixes in both Moodle settings and `.env`.
+- **`local_hermesagent_write_gateway_env()`** — merges textarea content
+  with existing `.env` (preserves non-platform lines), replaces old
+  platform lines on each write to avoid duplicates.
 - **`local_hermesagent_is_gateway_running()`** / **`is_gateway_configured()`**
   helper functions in `lib.php`.
 

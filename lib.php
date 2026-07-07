@@ -166,45 +166,49 @@ function local_hermesagent_restart_bridge(int $bridge_port): bool {
 }
 
 /**
- * Write the Matrix gateway config to $HERMES_HOME/.env so the gateway
- * process picks it up on start. Called when settings are saved.
+ * Write the gateway .env file from the textarea setting.
+ * Merges with existing .env (preserves non-platform lines).
+ * Called when the user clicks Start/Restart Gateway.
  */
 function local_hermesagent_write_gateway_env(): void {
     $hermes_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
     $env_file = "$hermes_home/.env";
 
-    $homeserver = get_config('local_hermesagent', 'matrix_homeserver');
-    $user_id    = get_config('local_hermesagent', 'matrix_user_id');
-    $token      = get_config('local_hermesagent', 'matrix_access_token');
-    $rooms      = get_config('local_hermesagent', 'matrix_allowed_rooms');
-    $device_id  = get_config('local_hermesagent', 'matrix_device_id');
+    // Get the textarea content from Moodle settings
+    $new_env = get_config('local_hermesagent', 'gateway_env') ?: '';
 
-    // Read existing .env, remove old MATRIX_ lines
+    // Platform env var prefixes (these get replaced on each write)
+    $platform_prefixes = [
+        'MATRIX_', 'TELEGRAM_', 'DISCORD_', 'SIGNAL_', 'MATTERMOST_',
+        'WHATSAPP_', 'WEIXIN_', 'IRC_', 'EMAIL_', 'LINE_', 'FEISHU_',
+        'DINGTALK_', 'GOOGLE_CHAT_', 'QQ_', 'NTFY_', 'BLUEBUBBLES_',
+        'YUANBAO_', 'HOME_ASSISTANT_',
+    ];
+
+    // Read existing .env, remove old platform lines
     $existing = [];
     if (file_exists($env_file)) {
         $lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         foreach ($lines as $line) {
-            if (strpos($line, 'MATRIX_') !== 0) {
+            $is_platform = false;
+            foreach ($platform_prefixes as $prefix) {
+                if (strpos($line, $prefix) === 0) {
+                    $is_platform = true;
+                    break;
+                }
+            }
+            if (!$is_platform) {
                 $existing[] = $line;
             }
         }
     }
 
-    // Append new MATRIX_ lines
-    if ($homeserver) {
-        $existing[] = "MATRIX_HOMESERVER=$homeserver";
-    }
-    if ($user_id) {
-        $existing[] = "MATRIX_USER_ID=$user_id";
-    }
-    if ($token) {
-        $existing[] = "MATRIX_ACCESS_TOKEN=$token";
-    }
-    if ($rooms) {
-        $existing[] = "MATRIX_ALLOWED_ROOMS=$rooms";
-    }
-    if ($device_id) {
-        $existing[] = "MATRIX_DEVICE_ID=$device_id";
+    // Append new platform lines from the textarea
+    $new_lines = array_filter(array_map('trim', explode("\n", $new_env)));
+    foreach ($new_lines as $line) {
+        if (!empty($line) && strpos($line, '#') !== 0) {
+            $existing[] = $line;
+        }
     }
 
     file_put_contents($env_file, implode("\n", $existing) . "\n");
@@ -225,12 +229,22 @@ function local_hermesagent_is_gateway_running(): bool {
 }
 
 /**
- * Check if Matrix gateway config is present.
+ * Check if any platform config is present (in Moodle settings or .env).
  */
 function local_hermesagent_is_gateway_configured(): bool {
-    $homeserver = get_config('local_hermesagent', 'matrix_homeserver');
-    $token      = get_config('local_hermesagent', 'matrix_access_token');
-    return !empty($homeserver) && !empty($token);
+    // Check the Moodle textarea setting
+    $env_text = get_config('local_hermesagent', 'gateway_env') ?: '';
+    if (!empty(trim($env_text))) {
+        return true;
+    }
+    // Check the .env file directly (dashboard may have written it)
+    $hermes_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
+    $env_file = "$hermes_home/.env";
+    if (file_exists($env_file)) {
+        $content = file_get_contents($env_file);
+        return (bool) preg_match('/^(MATRIX_|TELEGRAM_|DISCORD_|SIGNAL_|MATTERMOST_|WHATSAPP_|WEIXIN_|IRC_|EMAIL_|LINE_|FEISHU_|DINGTALK_|GOOGLE_CHAT_|QQ_|NTFY_|BLUEBUBBLES_)/m', $content);
+    }
+    return false;
 }
 
 /**

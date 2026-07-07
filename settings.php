@@ -124,18 +124,25 @@ if ($hassiteconfig) {
 
     // --- Gateway section ---
     $gw_running = local_hermesagent_is_gateway_running();
-    $gw_configured = local_hermesagent_is_gateway_configured();
     $gw_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
+
+    // Check if any platform config exists in .env
+    $gw_env_file = "$gw_home/.env";
+    $gw_has_platform = false;
+    if (file_exists($gw_env_file)) {
+        $env_content = file_get_contents($gw_env_file);
+        // Check for any known platform env var prefix
+        $gw_has_platform = preg_match('/^(MATRIX_|TELEGRAM_|DISCORD_|SIGNAL_|MATTERMOST_|WHATSAPP_|WEIXIN_|IRC_|EMAIL_|LINE_|FEISHU_|DINGTALK_|GOOGLE_CHAT_|QQ_|NTFY_|BLUEBUBBLES_)/m', $env_content);
+    }
 
     $gw_html = '<div class="hermes-status-panel">';
     $gw_html .= '<h4>' . get_string('gateway', 'local_hermesagent') . '</h4>';
     $gw_html .= '<p class="text-muted">' . get_string('gateway_desc', 'local_hermesagent') . '</p>';
     $gw_html .= '<table class="generaltable">';
-    if (!$gw_configured) {
+    if (!$gw_has_platform) {
         $gw_html .= '<tr><td>Status</td><td><span class="text-warning">' . get_string('gateway_not_configured', 'local_hermesagent') . '</span></td></tr>';
     } elseif ($gw_running) {
         $gw_html .= '<tr><td>Status</td><td><span class="text-success">Running</span></td></tr>';
-        // Show last log line
         $gw_log = "$gw_home/logs/gateway.log";
         if (file_exists($gw_log)) {
             $last_line = trim(shell_exec("tail -1 " . escapeshellarg($gw_log) . " 2>/dev/null"));
@@ -148,7 +155,7 @@ if ($hassiteconfig) {
     }
     $gw_html .= '</table>';
     $gw_html .= '<div class="mt-2">';
-    if ($gw_configured) {
+    if ($gw_has_platform || $gw_running) {
         if ($gw_running) {
             $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=restart&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-warning">Restart Gateway</a> ';
             $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=stop&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-danger">Stop Gateway</a> ';
@@ -156,34 +163,18 @@ if ($hassiteconfig) {
             $gw_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&target=gateway&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start Gateway</a> ';
         }
     }
+    $gw_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/dashboard.php/" target="_blank" class="btn btn-sm btn-info">Configure via Dashboard</a> ';
     $gw_html .= '</div>';
     $gw_html .= '</div>';
 
     $settings->add(new admin_setting_description('local_hermesagent/gateway_status', '', $gw_html));
 
-    $settings->add(new admin_setting_configtext('local_hermesagent/matrix_homeserver',
-        get_string('gateway_matrix_homeserver', 'local_hermesagent'),
-        get_string('gateway_matrix_homeserver_desc', 'local_hermesagent'),
-        '', PARAM_URL));
-
-    $settings->add(new admin_setting_configtext('local_hermesagent/matrix_user_id',
-        get_string('gateway_matrix_user_id', 'local_hermesagent'),
-        get_string('gateway_matrix_user_id_desc', 'local_hermesagent'),
-        '', PARAM_RAW));
-
-    $settings->add(new admin_setting_configpasswordunmask('local_hermesagent/matrix_access_token',
-        get_string('gateway_matrix_access_token', 'local_hermesagent'),
-        get_string('gateway_matrix_access_token_desc', 'local_hermesagent'),
-        ''));
-
-    $settings->add(new admin_setting_configtext('local_hermesagent/matrix_allowed_rooms',
-        get_string('gateway_matrix_allowed_rooms', 'local_hermesagent'),
-        get_string('gateway_matrix_allowed_rooms_desc', 'local_hermesagent'),
-        '', PARAM_RAW));
-
-    $settings->add(new admin_setting_configtext('local_hermesagent/matrix_device_id',
-        get_string('gateway_matrix_device_id', 'local_hermesagent'),
-        get_string('gateway_matrix_device_id_desc', 'local_hermesagent'),
+    // Generic .env textarea — power users can paste any platform env vars here.
+    // The dashboard is the recommended way to configure platforms (it has a
+    // proper UI for each platform). This textarea is for direct .env editing.
+    $settings->add(new admin_setting_configtextarea('local_hermesagent/gateway_env',
+        get_string('gateway_env', 'local_hermesagent'),
+        get_string('gateway_env_desc', 'local_hermesagent'),
         '', PARAM_RAW));
 
     // Terminal link

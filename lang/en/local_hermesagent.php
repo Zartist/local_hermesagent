@@ -59,18 +59,10 @@ $string['rename'] = 'Rename';
 
 // Gateway
 $string['gateway'] = 'Messaging Gateway';
-$string['gateway_desc'] = 'Connect Hermes to messaging platforms (Matrix, Telegram, etc.) so you can chat with the AI from Element, Telegram, or other messaging apps.';
-$string['gateway_matrix_homeserver'] = 'Matrix homeserver URL';
-$string['gateway_matrix_homeserver_desc'] = 'e.g. https://matrix.org';
-$string['gateway_matrix_user_id'] = 'Matrix user ID';
-$string['gateway_matrix_user_id_desc'] = 'Bot account, e.g. @hermes-bot:matrix.org';
-$string['gateway_matrix_access_token'] = 'Matrix access token';
-$string['gateway_matrix_access_token_desc'] = 'Get this from Element: Settings → Help & About → Access Token. Keep secret.';
-$string['gateway_matrix_allowed_rooms'] = 'Allowed room IDs';
-$string['gateway_matrix_allowed_rooms_desc'] = 'Comma-separated Matrix room IDs the bot responds in (e.g. !abc123:matrix.org). Leave blank to allow all DMs.';
-$string['gateway_matrix_device_id'] = 'Matrix device ID';
-$string['gateway_matrix_device_id_desc'] = 'Optional. Stable device ID for E2EE persistence across restarts.';
-$string['gateway_not_configured'] = 'Not configured — enter Matrix settings below, then click Start Gateway.';
+$string['gateway_desc'] = 'Connect Hermes to messaging platforms (Matrix, Telegram, Discord, Signal, and more) so you can chat with the AI from Element, Telegram, or other apps. Use the Dashboard button for a guided setup UI, or paste env vars directly below.';
+$string['gateway_env'] = 'Gateway .env (advanced)';
+$string['gateway_env_desc'] = 'Paste platform environment variables here (one per line). These are written to $HERMES_HOME/.env when you click Start/Restart Gateway. Examples: MATRIX_HOMESERVER=https://matrix.org, TELEGRAM_BOT_TOKEN=123456:ABC, DISCORD_BOT_TOKEN=... The Dashboard provides a proper UI for each platform — recommended for most users.';
+$string['gateway_not_configured'] = 'Not configured — click "Configure via Dashboard" or paste env vars below, then Start Gateway.';
 
 // Slash commands
 $string['slash_help'] = 'Slash commands: /stop (abort response), /new (new conversation), /clear (clear view), /status (bridge health), /help (this message)';
