@@ -22,7 +22,7 @@ require_capability('local/hermesagent:configure', context_system::instance());
 
 $hermes_home = '/var/www/moodledata/.hermes';
 $venv_bin = "$hermes_home/venv/bin";
-$dashboard_port = 9119;
+$dashboard_port = (int) get_config('local_hermesagent', 'dashboard_port') ?: 9119;
 $session_token = 'hermes-moodle-dashboard';
 
 // --- Ensure dashboard is running -------------------------------------------
