@@ -5,6 +5,25 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.3.9] — 2026-07-07
+
+### Fixed
+
+#### Dashboard proxy
+- **CSS font path rewriting** — the dashboard CSS references fonts via
+  `url(/assets/...)` and `url(/fonts-terminal/...)` which bypassed the
+  proxy and returned 404. Now rewrites `url()` references in CSS responses
+  so fonts load through `dashboard.php/assets/...` and
+  `dashboard.php/fonts-terminal/...`.
+- **WebSocket retry spam suppressed** — the dashboard SPA uses WebSockets
+  for real-time features (embedded chat, PTY terminal, event streaming)
+  which PHP-FPM cannot proxy. Set `__HERMES_DASHBOARD_EMBEDDED_CHAT__=false`
+  to disable the embedded chat widget, and injected a WebSocket guard
+  script that silently rejects `ws://`/`wss://` connections targeting
+  `dashboard.php` so the browser doesn't retry endlessly.
+
+---
+
 ## [0.3.8] — 2026-07-07
 
 ### Fixed
