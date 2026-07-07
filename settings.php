@@ -9,6 +9,8 @@ if ($hassiteconfig) {
 
     $hermes_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
     $hermes_docs = 'https://hermes-agent.nousresearch.com/docs';
+    $hermes_docs_config = 'https://hermes-agent.nousresearch.com/docs/user-guide/configuration';
+    $hermes_docs_gateway = 'https://hermes-agent.nousresearch.com/docs/user-guide/messaging';
 
     // Handle actions inline (restart, start, stop — for both bridge and gateway)
     $action = optional_param('action', '', PARAM_ALPHANUM);
@@ -119,7 +121,7 @@ if ($hassiteconfig) {
     // Section 3: Hermes Configuration (config.yaml)
     // ================================================================
     $config_desc = get_string('config_yaml_desc', 'local_hermesagent');
-    $config_desc .= '<br><a href="' . $hermes_docs . '" target="_blank">📖 Hermes Documentation</a>';
+    $config_desc .= '<br><a href="' . $hermes_docs_config . '" target="_blank">📖 Hermes Documentation</a>';
     $settings->add(new admin_setting_heading('hermesagent_config', get_string('hermes_config', 'local_hermesagent'), ''));
 
     $settings->add(new \local_hermesagent\admin\setting_configfile(
@@ -171,7 +173,7 @@ if ($hassiteconfig) {
     $settings->add(new admin_setting_heading('hermesagent_gateway', get_string('gateway', 'local_hermesagent'), $gw_html));
 
     $env_desc = get_string('gateway_env_desc', 'local_hermesagent');
-    $env_desc .= '<br><a href="' . $hermes_docs . '/gateway" target="_blank">📖 Gateway Documentation</a>';
+    $env_desc .= '<br><a href="' . $hermes_docs_gateway . '" target="_blank">📖 Gateway Documentation</a>';
     $settings->add(new \local_hermesagent\admin\setting_configfile(
         'local_hermesagent/gateway_env',
         get_string('gateway_env', 'local_hermesagent'),
