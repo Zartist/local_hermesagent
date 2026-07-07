@@ -97,6 +97,7 @@ if ($hassiteconfig) {
         $bridge_html .= '<a href="' . $CFG->wwwroot . '/admin/settings.php?section=local_hermesagent_settings&action=start&sesskey=' . sesskey() . '" class="btn btn-sm btn-success">Start ACP</a> ';
     }
     $bridge_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/settings_action.php?action=update&sesskey=' . sesskey() . '" class="btn btn-sm btn-info">Update &amp; Bootstrap</a> ';
+    $bridge_html .= '<a href="' . $CFG->wwwroot . '/local/hermesagent/dashboard.php/" target="_blank" class="btn btn-sm btn-primary">Dashboard</a> ';
     $bridge_html .= '</div>';
     $bridge_html .= '</div>';
 
