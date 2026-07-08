@@ -262,6 +262,34 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             copyToClipboard(text, this);
         });
 
+        // Per-message reply/quote button (delegated)
+        $(document).on('click', '.hermes-reply-btn', function() {
+            var text = $(this).data('raw-text');
+            var role = $(this).data('role') || 'user';
+            var input = $('#hermes-message-input');
+            var prefix = role === 'assistant' ? '> [Assistant]: ' : '> [Me]: ';
+            var quoted = text.split('\n').map(function(line) {
+                return '> ' + line;
+            }).join('\n');
+            var currentVal = input.val().trim();
+            var newVal;
+            if (currentVal) {
+                newVal = quoted + '\n\n' + currentVal;
+            } else {
+                newVal = quoted + '\n\n';
+            }
+            input.val(newVal);
+            input.focus();
+            // Place cursor at the end
+            var ta = input[0];
+            ta.selectionStart = ta.selectionEnd = ta.value.length;
+            // Visual feedback
+            var orig = $(this).text();
+            $(this).text('✓');
+            var $btn = $(this);
+            setTimeout(function() { $btn.text(orig); }, 1500);
+        });
+
         // Double-click message content to select it
         $(document).on('dblclick', '.hermes-content', function() {
             var range = document.createRange();
@@ -497,8 +525,13 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 es.close();
                 eventSourceRef = null;
                 finishStreaming(spinnerId);
-                // Add copy button inside the bubble, after the content div
-                messageEl.parent().append('<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(rawMarkdown) + '" title="Copy">📋</button>');
+                // Add reply + copy buttons inside the bubble, after the content div
+                messageEl.parent().append(
+                    '<div class="hermes-msg-actions">' +
+                    '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(rawMarkdown) + '" data-role="assistant" title="Quote">↩</button>' +
+                    '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(rawMarkdown) + '" title="Copy">📋</button>' +
+                    '</div>'
+                );
                 saveAssistantResponse(conversationid, rawMarkdown);
             });
 
@@ -665,7 +698,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             '<div class="hermes-avatar hermes-user-avatar">U</div>' +
             '<div class="hermes-bubble hermes-user-bubble">' +
             '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+            '<div class="hermes-msg-actions">' +
+            '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="user" title="Quote">↩</button>' +
             '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
+            '</div>' +
             '</div></div>'
         );
         scrollToEnd();
@@ -715,7 +751,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     '<div class="hermes-avatar hermes-user-avatar">U</div>' +
                     '<div class="hermes-bubble hermes-user-bubble">' +
                     '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+                    '<div class="hermes-msg-actions">' +
+                    '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="user" title="Quote">↩</button>' +
                     '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
+                    '</div>' +
                     '</div></div>'
                 );
             } else if (msg.role === 'assistant') {
@@ -724,7 +763,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
                     '<div class="hermes-bubble hermes-assistant-bubble">' +
                     '<div class="hermes-content"></div>' +
+                    '<div class="hermes-msg-actions">' +
+                    '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="assistant" title="Quote">↩</button>' +
                     '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
+                    '</div>' +
                     '</div></div>'
                 );
                 var $content = chatArea.find('.hermes-content').last();
