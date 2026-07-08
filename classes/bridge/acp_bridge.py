@@ -555,6 +555,22 @@ async def session_prompt(request: Request):
                 if abort_event.is_set() and not aborted:
                     aborted = True
                     log.info("User requested abort for conversation %s", conversationid)
+                    # Drain any stale messages from the inbox so the next
+                    # prompt doesn't pick up leftover chunks from this one.
+                    # hermes acp doesn't support session/cancel, so it keeps
+                    # running in the background — we drain what's already
+                    # queued, then briefly wait and drain again to catch
+                    # any final messages arriving after the abort.
+                    drained = 0
+                    for _ in range(3):
+                        while True:
+                            try:
+                                acp.inbox.get_nowait()
+                                drained += 1
+                            except queue.Empty:
+                                break
+                        time.sleep(0.3)
+                    log.info("Drained %d stale messages from inbox after abort", drained)
                     data = {"type": "aborted", "message": "Response stopped by user"}
                     yield f"event: aborted\ndata: {json.dumps(data)}\n\n"
                     return
