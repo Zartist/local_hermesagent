@@ -135,8 +135,12 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
         });
 
         // --- Conversation search ---
-        $('#hermes-conv-search').on('input', function() {
-            var query = $(this).val().toLowerCase().trim();
+        var $searchInput = $('#hermes-conv-search');
+        var $searchClear = $('#hermes-search-clear');
+
+        function runSearch() {
+            var query = $searchInput.val().toLowerCase().trim();
+            $searchClear.toggle(!!query);
             $('.hermes-conv-item').each(function() {
                 var name = $(this).data('conv-name') || '';
                 if (!query || name.indexOf(query) !== -1) {
@@ -145,7 +149,6 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
                     $(this).hide();
                 }
             });
-            // Show a "no results" message if nothing matches
             if (query && $('.hermes-conv-item:visible').length === 0) {
                 if (!$('#hermes-search-empty').length) {
                     $('.hermes-conversation-list').append(
@@ -154,6 +157,23 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
                 }
             } else {
                 $('#hermes-search-empty').remove();
+            }
+        }
+
+        $searchInput.on('input', runSearch);
+
+        // Clear button
+        $searchClear.on('click', function() {
+            $searchInput.val('').focus();
+            runSearch();
+        });
+
+        // Escape clears search
+        $searchInput.on('keydown', function(e) {
+            if (e.key === 'Escape') {
+                $searchInput.val('');
+                runSearch();
+                this.blur();
             }
         });
 

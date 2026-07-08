@@ -126,6 +126,13 @@ echo html_writer::empty_tag('input', [
     'placeholder' => 'Search conversations…',
     'autocomplete' => 'off',
 ]);
+echo html_writer::tag('button', '✕', [
+    'id' => 'hermes-search-clear',
+    'class' => 'hermes-search-clear',
+    'title' => 'Clear search',
+    'type' => 'button',
+    'style' => 'display:none;',
+]);
 echo html_writer::end_div();
 
 echo html_writer::end_div('hermes-sidebar-header');

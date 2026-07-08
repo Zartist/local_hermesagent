@@ -585,12 +585,13 @@
 
 /* Conversation search box */
 .hermes-search-container {
+  position: relative;
   padding: 4px 0;
 }
 .hermes-search-input {
   width: 100%;
   font-size: 13px;
-  padding: 6px 10px;
+  padding: 6px 28px 6px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   background: #f8fafc;
@@ -600,6 +601,22 @@
   background: white;
   outline: none;
   box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+}
+.hermes-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #94a3b8;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.hermes-search-clear:hover {
+  color: #475569;
 }
 .hermes-search-empty {
   padding: 16px;
