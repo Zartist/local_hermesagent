@@ -167,20 +167,12 @@ function api_stream_response(): void {
         die();
     }
 
-    // Get conversation history from DB
+    // Get the last user message from conversation history
     $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $conversationid], 'id ASC');
     $user_message = '';
-    $history = [];
     foreach ($messages as $msg) {
         if ($msg->role === 'user') {
             $user_message = $msg->content;
-        }
-        // Skip empty assistant messages (created during streaming but not yet saved)
-        if (trim($msg->content) !== '') {
-            $history[] = [
-                'role' => $msg->role,
-                'content' => $msg->content,
-            ];
         }
     }
     
@@ -197,13 +189,13 @@ function api_stream_response(): void {
     }
     
     // Build request to ACP bridge
-    // Send full conversation history so the agent has context even if the
-    // ACP session's internal context window has truncated older messages.
+    // The ACP session maintains conversation history internally with automatic
+    // compaction (archive_and_compact) — old messages are summarized, not lost.
+    // Sending full history every time would duplicate tokens and waste context.
     $request = [
         'conversationid' => $conversationid,
         'message' => $user_message,
         'system_prompt' => $system_prompt,
-        'messages' => $history,
     ];
     
     // CRITICAL: Release session and flush buffers BEFORE any output
