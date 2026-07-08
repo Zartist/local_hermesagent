@@ -15,17 +15,79 @@
 /* Sidebar */
 .hermes-sidebar {
   width: 260px;
-  min-width: 260px;
+  min-width: 160px;
+  max-width: 500px;
   background: #1e1e2e;
   color: #cdd6f4;
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+.hermes-sidebar.hermes-sidebar-collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  border-right: none;
+}
+
+/* Collapse button in sidebar header */
+.hermes-sidebar-collapse-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: #7f849c;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.hermes-sidebar-collapse-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #cdd6f4;
+}
+
+/* Expand button (floating, visible when collapsed) */
+.hermes-sidebar-expand-btn {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 4px;
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hermes-sidebar-expand-btn:hover {
+  background: #313244;
+}
+
+/* Resize handle */
+.hermes-sidebar-resizer {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+.hermes-sidebar-resizer:hover,
+.hermes-sidebar-resizer.hermes-resizing {
+  background: rgba(79, 70, 229, 0.4);
 }
 
 .hermes-sidebar-header {
   padding: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
 }
 .hermes-sidebar-header h3 {
   margin: 0 0 8px;
@@ -494,6 +556,12 @@
     padding: 8px 10px;
   }
   .hermes-conv-rename {
+    display: none !important;
+  }
+  /* Hide resize/collapse on mobile — uses header tap instead */
+  .hermes-sidebar-resizer,
+  .hermes-sidebar-collapse-btn,
+  .hermes-sidebar-expand-btn {
     display: none !important;
   }
   .hermes-sidebar-footer {

@@ -90,6 +90,11 @@ echo html_writer::start_div('hermes-chat-container');
 echo html_writer::start_div('hermes-sidebar');
 echo html_writer::start_div('hermes-sidebar-header');
 echo html_writer::tag('h3', get_string('conversations', 'local_hermesagent'));
+echo html_writer::tag('button', '◀', [
+    'id' => 'hermes-sidebar-collapse',
+    'class' => 'hermes-sidebar-collapse-btn',
+    'title' => 'Collapse sidebar',
+]);
 
 // Bulk action toolbar (hidden until a checkbox is checked)
 echo html_writer::start_div('hermes-bulk-actions', ['style' => 'display:none;']);
@@ -158,7 +163,20 @@ echo html_writer::tag('div', get_string('bridge_status', 'local_hermesagent') . 
     'class' => 'mt-2 hermes-bridge-status',
 ]);
 echo html_writer::end_div('hermes-sidebar-footer');
+
+// Resize handle between sidebar and chat area
+echo html_writer::start_div('hermes-sidebar-resizer', ['id' => 'hermes-sidebar-resizer']);
+echo html_writer::end_div('hermes-sidebar-resizer');
+
 echo html_writer::end_div('hermes-sidebar');
+
+// Expand button (visible when sidebar is collapsed)
+echo html_writer::tag('button', '▶', [
+    'id' => 'hermes-sidebar-expand',
+    'class' => 'hermes-sidebar-expand-btn',
+    'title' => 'Expand sidebar',
+    'style' => 'display:none;',
+]);
 
 // Main chat area
 echo html_writer::start_div('hermes-main');

@@ -270,6 +270,91 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             sel.removeAllRanges();
             sel.addRange(range);
         });
+
+        // --- Sidebar collapse / expand ---
+        $('#hermes-sidebar-collapse').on('click', function(e) {
+            e.stopPropagation();
+            $('.hermes-sidebar').addClass('hermes-sidebar-collapsed');
+            $('#hermes-sidebar-expand').show();
+        });
+        $('#hermes-sidebar-expand').on('click', function() {
+            $('.hermes-sidebar').removeClass('hermes-sidebar-collapsed');
+            $('#hermes-sidebar-expand').hide();
+        });
+
+        // --- Sidebar resize (drag handle) ---
+        var $sidebar = $('.hermes-sidebar');
+        var $resizer = $('#hermes-sidebar-resizer');
+        var isResizing = false;
+        var startX = 0;
+        var startWidth = 0;
+
+        $resizer.on('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = $sidebar.width();
+            $resizer.addClass('hermes-resizing');
+            $('body').css('user-select', 'none').css('cursor', 'col-resize');
+        });
+
+        $(document).on('mousemove', function(e) {
+            if (!isResizing) return;
+            var delta = e.clientX - startX;
+            var newWidth = startWidth + delta;
+            // Clamp between 160 and 500
+            newWidth = Math.max(160, Math.min(500, newWidth));
+            $sidebar.css('width', newWidth + 'px').css('min-width', newWidth + 'px');
+        });
+
+        $(document).on('mouseup', function() {
+            if (isResizing) {
+                isResizing = false;
+                $resizer.removeClass('hermes-resizing');
+                $('body').css('user-select', '').css('cursor', '');
+                // Persist width to localStorage
+                try {
+                    localStorage.setItem('hermes_sidebar_width', $sidebar.width());
+                } catch (e) { /* ignore */ }
+            }
+        });
+
+        // Touch support for resizing
+        $resizer.on('touchstart', function(e) {
+            e.preventDefault();
+            isResizing = true;
+            var touch = e.originalEvent.touches[0];
+            startX = touch.clientX;
+            startWidth = $sidebar.width();
+            $resizer.addClass('hermes-resizing');
+        });
+        $(document).on('touchmove', function(e) {
+            if (!isResizing) return;
+            e.preventDefault();
+            var touch = e.originalEvent.touches[0];
+            var delta = touch.clientX - startX;
+            var newWidth = startWidth + delta;
+            newWidth = Math.max(160, Math.min(500, newWidth));
+            $sidebar.css('width', newWidth + 'px').css('min-width', newWidth + 'px');
+        });
+        $(document).on('touchend', function() {
+            if (isResizing) {
+                isResizing = false;
+                $resizer.removeClass('hermes-resizing');
+                try {
+                    localStorage.setItem('hermes_sidebar_width', $sidebar.width());
+                } catch (e) { /* ignore */ }
+            }
+        });
+
+        // Restore saved sidebar width
+        try {
+            var savedWidth = localStorage.getItem('hermes_sidebar_width');
+            if (savedWidth) {
+                $sidebar.css('width', savedWidth + 'px').css('min-width', savedWidth + 'px');
+            }
+        } catch (e) { /* ignore */ }
     };
 
     // ---------------------------------------------------------------------------
