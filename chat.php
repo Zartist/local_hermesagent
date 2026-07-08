@@ -100,7 +100,7 @@ echo html_writer::empty_tag('input', [
     'type' => 'text',
     'id' => 'hermes-conv-search',
     'class' => 'hermes-search-input form-control',
-    'placeholder' => 'Search conversations…',
+    'placeholder' => 'Filter conversations…',
     'autocomplete' => 'off',
 ]);
 echo html_writer::tag('button', '✕', [
