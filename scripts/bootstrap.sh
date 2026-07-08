@@ -75,6 +75,12 @@ else
     echo "  WARNING: acp_bridge.py not found in plugin dir"
 fi
 
+# Patch ACP adapter to use configurable approval timeout (default 600s)
+if [ -f "$PLUGIN_DIR/scripts/patch_acp_timeout.py" ]; then
+    "$HERMES_HOME/venv/bin/python" "$PLUGIN_DIR/scripts/patch_acp_timeout.py" 2>&1 || \
+        echo "  WARNING: ACP timeout patch failed (non-fatal)"
+fi
+
 # Install MCP server script
 if [ -f "$PLUGIN_DIR/scripts/moodle_db_mcp.py" ]; then
     rm -f "$HERMES_HOME/mcp_servers/moodle_db_mcp.py"
