@@ -168,6 +168,10 @@ function api_stream_response(): void {
     }
 
     // Get conversation history from DB
+    // Limit to most recent messages to avoid sending huge payloads on long
+    // conversations. The ACP session maintains full history internally with
+    // automatic compaction; this is only needed after a bridge restart.
+    $MAX_HISTORY_MESSAGES = 40; // ~20 user+assistant turns
     $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $conversationid], 'id ASC');
     $user_message = '';
     $history = [];
@@ -182,6 +186,10 @@ function api_stream_response(): void {
                 'content' => $msg->content,
             ];
         }
+    }
+    // Keep only the most recent messages if history is long
+    if (count($history) > $MAX_HISTORY_MESSAGES) {
+        $history = array_slice($history, -$MAX_HISTORY_MESSAGES);
     }
 
     // Get loaded skills and build system prompt

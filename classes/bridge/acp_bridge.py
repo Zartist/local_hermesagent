@@ -570,15 +570,22 @@ async def session_prompt(request: Request):
     # On new sessions (bridge restart or first message), include conversation
     # history so the agent has context. On subsequent prompts, the ACP session
     # maintains history internally with automatic compaction.
+    # History is limited to recent messages by api.php (MAX_HISTORY_MESSAGES)
+    # to avoid context window overflow on long conversations.
     if system_prompt and is_new_session and messages:
+        MAX_HISTORY_CHARS = 50000  # Safety net: ~12K tokens
         history_text = ""
+        truncated = False
         for m in messages:
             role = m.get("role", "")
             content = m.get("content", "")
-            if role == "user":
-                history_text += f"User: {content}\n\n"
-            elif role == "assistant":
-                history_text += f"Assistant: {content}\n\n"
+            entry = f"{'User' if role == 'user' else 'Assistant'}: {content}\n\n"
+            if len(history_text) + len(entry) > MAX_HISTORY_CHARS:
+                truncated = True
+                break
+            history_text += entry
+        if truncated:
+            history_text = f"[Note: earlier messages omitted — showing most recent {len(history_text.split('User:'))-1 + len(history_text.split('Assistant:'))-2} messages]\n\n" + history_text
         full_prompt = f"[SYSTEM]\n{system_prompt}\n\n[/SYSTEM]\n\n[CONVERSATION HISTORY]\n{history_text}[/CONVERSATION HISTORY]\n\n{prompt_text}"
     elif system_prompt:
         full_prompt = f"[SYSTEM]\n{system_prompt}\n\n[/SYSTEM]\n\n{prompt_text}"
