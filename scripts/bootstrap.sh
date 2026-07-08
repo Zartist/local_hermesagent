@@ -128,10 +128,20 @@ cfg['agent']['environment_hint'] = hint
 # Set approval timeout to 600s (10 min) — allows time for browser-based approval
 cfg.setdefault('approvals', {})
 cfg['approvals']['timeout'] = 600
+# Configure vision auxiliary to use the custom provider (same as main model)
+cfg.setdefault('auxiliary', {})
+cfg['auxiliary'].setdefault('vision', {})
+cfg['auxiliary']['vision']['provider'] = 'custom:Socratic.cs.cityu.edu.hk'
+cfg['auxiliary']['vision']['model'] = 'Socrates'
+cfg['auxiliary']['vision']['base_url'] = 'https://socratic.cs.cityu.edu.hk/ai-test/v1'
+cfg['auxiliary']['vision']['api_key'] = '1d90785d9594f5001583f921c1878fb57d711b94ab774d3f8136631c6c253706'
+cfg['auxiliary']['vision']['timeout'] = 120
+cfg['auxiliary']['vision']['download_timeout'] = 30
 with open(path, 'w') as f:
     yaml.dump(cfg, f, default_flow_style=False, sort_keys=False, width=200)
 print('  environment_hint: set')
 print('  approvals.timeout: 600')
+print('  auxiliary.vision: custom:Socratic.cs.cityu.edu.hk / Socrates')
 " CONFIG_FILE=\"$CONFIG_FILE\" 2>&1
 
 # Add moodle_db MCP server config if not present
