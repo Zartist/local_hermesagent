@@ -5,6 +5,85 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.4.1] — 2026-07-08
+
+### Fixed
+
+#### Abort / Stop streaming (critical)
+- **Abort now properly stops streaming and prevents stale messages** —
+  previously, after clicking Stop, the `hermes acp` process kept running
+  and writing to the shared inbox queue. The next prompt would pick up
+  stale messages from the aborted session, producing garbled output.
+  Three fixes applied to `acp_bridge.py`:
+  1. `abort_event` passed into `send_prompt_streaming()` — checked during
+     the 0.5s inbox wait gap to break early instead of hanging.
+  2. `session_id` filtering — `session/update` notifications with the
+     wrong `session_id` are discarded, preventing cross-session pollution.
+  3. Inbox drain (3 rounds × 0.3s pauses) after abort to clear residual
+     messages.
+- Tested: `prompt_in_progress` releases within 2s, SSE sends
+  `event: aborted`, new prompt after abort produces clean output.
+
+#### Settings page Stop button (critical)
+- **Stop button now actually stops the bridge** — the bridge was running
+  as **root** (started via `kubectl exec`), but PHP-FPM runs as
+  `www-data`. The `kill` command silently failed because `www-data`
+  cannot kill root-owned processes. Fixed by killing root processes and
+  restarting as `www-data` via the control script.
+- **`hermes-bridge-control.sh`** now warns when `kill` fails:
+  "WARNING: cannot kill pid X" instead of silent failure.
+
+#### Settings page status freshness
+- **"Stopped — will auto-start on first chat"** → just **"Stopped"**.
+  The bridge does not auto-start; this message was misleading.
+- **Status now refreshes after stop/start/restart** — added
+  cache-busting `?t=time()` parameter to the redirect URL so the page
+  re-renders with fresh bridge health.
+- **Post-stop verification** — after calling stop, checks bridge health
+  and warns if still running (e.g. "ACP Bridge may not have stopped —
+  check that it is running as www-data, not root").
+
+#### Conversation timestamp
+- **Timestamp now reflects the latest message** —
+  `save_assistant_response()` only updated the message's `timemodified`
+  but not the conversation's. The sidebar showed the time of the user's
+  last message, not the assistant's reply. Now both `send_message` and
+  `save_assistant_response` update `conv->timemodified`.
+
+### Changed
+
+#### Conversation history management
+- **ACP session ID persisted to Moodle DB** — the `acp_session_id`
+  column existed in `local_hermesagent_conversations` but was never
+  used. Now saved from the bridge's SSE response on every prompt.
+- **History sent on new sessions after bridge restart** — previously,
+  the conversation→ACP session mapping was in-memory only
+  (`acp._sessions = {}`). When the bridge restarted, all mappings were
+  lost and each conversation got a new empty ACP session — the agent
+  forgot all prior context. Now, when creating a new session, the bridge
+  includes conversation history in the first prompt so the agent has
+  context.
+- **History limited to 40 most recent messages** (~20 user+assistant
+  turns) to prevent context window overflow on long conversations.
+  Character-based safety net in the bridge: `MAX_HISTORY_CHARS=50000`
+  (~12K tokens) with truncation note.
+- **`session/load` not used** — hermes acp's `session/load` often fails
+  ("Failed to recreate agent" for old sessions), so we always create
+  fresh sessions and include history in the prompt instead.
+- **Subsequent prompts only send the latest message** — relies on the
+  ACP session's internal memory with automatic compaction
+  (`archive_and_compact` at 50% of context window). No duplication.
+- **`api.php` sends `messages` array and `acp_session_id`** to the
+  bridge on every request; the bridge decides whether to include history
+  based on `is_new_session`.
+
+#### Chat sidebar
+- **Removed bridge status indicator from chat sidebar footer** — it was
+  stale (only checked at page load) and polling would be inefficient.
+  The settings page is the authoritative place for bridge status.
+
+---
+
 ## [0.4.0] — 2026-07-08
 
 ### Added
