@@ -315,6 +315,9 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
             $rec->content = $params['content'];
             $rec->timemodified = time();
             $DB->update_record('local_hermesagent_messages', $rec);
+            // Update conversation timestamp to reflect latest activity
+            $conv->timemodified = time();
+            $DB->update_record('local_hermesagent_conversations', $conv);
             return ['status' => 'updated', 'messageid' => $existing->id];
         } else {
             // No assistant message exists — create one (fallback)
@@ -324,6 +327,9 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
             $rec->content = $params['content'];
             $rec->timemodified = time();
             $DB->insert_record('local_hermesagent_messages', $rec);
+            // Update conversation timestamp to reflect latest activity
+            $conv->timemodified = time();
+            $DB->update_record('local_hermesagent_conversations', $conv);
             return ['status' => 'created'];
         }
     }
