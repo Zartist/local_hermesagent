@@ -5,6 +5,91 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.3.11] — 2026-07-08
+
+### Added
+
+#### Tool approval (inline, non-blocking)
+- **Inline approve/reject buttons** in the chat stream — when Hermes wants
+  to execute a tool (write_file, terminal, etc.), a yellow-tinted permission
+  bubble appears inline in the chat with the tool name, a diff/description,
+  and Approve / Reject buttons. Non-blocking: you can scroll, read context,
+  and approve later. Multiple pending requests each get their own buttons.
+  After clicking, buttons are replaced with "✓ Approved" or "✗ Rejected".
+- **Bridge forwards `session/request_permission`** as an SSE `permission`
+  event to the browser (was previously auto-approved silently by the bridge).
+- **`POST /session/permission`** endpoint on the bridge — receives the
+  browser's approval/rejection and sends the correct ACP
+  `RequestPermissionResponse` back to the `hermes acp` process.
+- **`permission_response` action** in `api.php` — bridges the browser's
+  POST to the bridge's `/session/permission` endpoint.
+- **`scripts/patch_acp_timeout.py`** — patches the ACP adapter
+  (`acp_adapter/permissions.py` and `edit_approval.py`) to read
+  `ACP_APPROVAL_TIMEOUT` env var instead of the hardcoded 60s default.
+  Called automatically by `bootstrap.sh` after every `hermes update`.
+
+#### Mobile / foldable responsive chat
+- **Collapsible sidebar** — on phones (< 600px), the conversation list
+  collapses to a tappable header with a ▼ indicator. Tap to expand/collapse.
+- **Foldable layout** (601–1024px) — 220px sidebar, 85% message width,
+  compact conversation items. No more cramped full-width sidebar.
+- **iOS zoom prevention** — `font-size: 16px` on the input textarea.
+- **Compact bubbles** — smaller avatars, tighter padding on mobile.
+
+### Fixed
+
+- **Tool approval "Unknown tool"** — the bridge looked for `params.call.*`
+  but the ACP protocol sends `params.toolCall.*` with `rawInput.tool` and
+  `rawInput.arguments`. Now correctly extracts tool name (e.g.
+  `write_file: /tmp/hello.py`, `terminal: cat > /tmp/hello.py`).
+
+- **Tool approval "Connection error"** — three root causes, all fixed:
+  1. **ACP 60s internal timeout** — `acp_adapter/permissions.py` and
+     `edit_approval.py` hardcode a 60s `future.result(timeout=60)` that is
+     separate from `config.yaml`'s `approvals.timeout`. Patched to read
+     `ACP_APPROVAL_TIMEOUT` env var (default 600s). The
+     `hermes-bridge-control.sh` script now exports
+     `ACP_APPROVAL_TIMEOUT=600`.
+  2. **Wrong ACP response format** — the bridge sent
+     `{"result": {"status": "accepted"}}` but the ACP protocol's
+     `RequestPermissionResponse` expects
+     `{"result": {"outcome": {"outcome": "selected", "optionId": "allow_once"}}}`
+     for approve, or `{"result": {"outcome": {"outcome": "cancelled"}}}`
+     for reject. The old format caused a Pydantic validation error and the
+     ACP treated it as "denied" — even when the approval arrived in 0.39s.
+  3. **`PARAM_ALPHA` stripped underscores** — Moodle's `PARAM_ALPHA` only
+     allows a–z and silently strips everything else. `permission_response`
+     was converted to `permissionresponse`, which didn't match any `switch`
+     case — so `api_permission_response()` was never called and the
+     browser's approval was silently discarded. Changed to
+     `PARAM_ALPHANUMEXT` (allows a–z, 0–9, `_`, `-`).
+
+- **Chat stuck loading / send button not working** — Moodle's AMD loader
+  only serves files from `amd/build/`, not `amd/src/`. The stale
+  `amd/build/chat.js` (from June 16, old code with `handleToolResponse`)
+  was being served instead of the updated source. Created
+  `amd/build/chat.js` and `amd/build/chat.min.js` as copies of the source.
+
+- **Bridge deadlocks after failed approval** — when the SSE stream drops
+  or the ACP times out waiting for a permission response, the prompt lock
+  is never released, causing all subsequent requests to fail with
+  `TimeoutError: Timed out waiting for ACP response to session/new`.
+  Restarting the bridge clears the lock.
+
+- **`config.yaml` `approvals.timeout: 600`** — set in both the live config
+  and `bootstrap.sh` so the CLI callbacks path also uses 600s (was 60s).
+
+### Changed
+
+- **`api.php` cURL timeout** increased from 300s to 600s to allow time for
+  tool approval within a single SSE stream.
+- **`acp_bridge.py` ACP timeout** increased from 300s to 600s.
+- **`_handle_notification`** for `session/request_permission` now returns
+  `False` (don't consume) instead of `True`, letting the streaming loop
+  handle the permission event and yield it to the browser.
+
+---
+
 ## [0.3.10] — 2026-07-08
 
 ### Added
