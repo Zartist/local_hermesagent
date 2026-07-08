@@ -271,7 +271,7 @@ class ACPProcess:
         log.info("Created ACP session: %s", session_id)
         return session_id
 
-    def send_prompt_streaming(self, session_id, prompt_text, timeout=None):
+    def send_prompt_streaming(self, session_id, prompt_text, timeout=None, abort_event=None):
         """Send a prompt and yield SSE events as they arrive from the agent.
 
         This reads from the shared inbox and yields events for this specific
@@ -319,15 +319,26 @@ class ACPProcess:
             try:
                 msg = self.inbox.get(timeout=0.5)
             except queue.Empty:
+                # Check abort during the 0.5s wait gap
+                if abort_event and abort_event.is_set():
+                    return
                 continue
 
             # Skip messages for other requests
             msg_id = msg.get("id")
             method = msg.get("method")
 
-            # Handle session/update notifications
+            # Filter session/update notifications by session_id — after an abort,
+            # hermes acp keeps running the old prompt and sends session/update
+            # messages for the old session. These must be discarded so they don't
+            # pollute the next prompt's stream.
             if method == "session/update":
                 params = msg.get("params", {})
+                msg_session_id = params.get("sessionId", "")
+                if msg_session_id and msg_session_id != session_id:
+                    log.debug("Discarding session/update from other session %s (expected %s)",
+                              msg_session_id, session_id)
+                    continue
                 update = params.get("update", {})
                 kind = str(update.get("sessionUpdate", "")).strip()
                 content = update.get("content", {})
@@ -550,26 +561,24 @@ async def session_prompt(request: Request):
             yield f"event: error\\ndata: {json.dumps(data)}\\n\\n"
             return
         try:
-            for event in acp.send_prompt_streaming(acp_session_id, full_prompt):
+            for event in acp.send_prompt_streaming(acp_session_id, full_prompt, abort_event=abort_event):
                 # Check if user requested abort
                 if abort_event.is_set() and not aborted:
                     aborted = True
                     log.info("User requested abort for conversation %s", conversationid)
-                    # Drain any stale messages from the inbox so the next
+                    # Drain any messages already in the inbox so the next
                     # prompt doesn't pick up leftover chunks from this one.
                     # hermes acp doesn't support session/cancel, so it keeps
-                    # running in the background — we drain what's already
-                    # queued, then briefly wait and drain again to catch
-                    # any final messages arriving after the abort.
+                    # running in the background, but send_prompt_streaming
+                    # filters by session_id so stale messages from the old
+                    # session won't be processed by the next prompt.
                     drained = 0
-                    for _ in range(3):
-                        while True:
-                            try:
-                                acp.inbox.get_nowait()
-                                drained += 1
-                            except queue.Empty:
-                                break
-                        time.sleep(0.3)
+                    while True:
+                        try:
+                            acp.inbox.get_nowait()
+                            drained += 1
+                        except queue.Empty:
+                            break
                     log.info("Drained %d stale messages from inbox after abort", drained)
                     data = {"type": "aborted", "message": "Response stopped by user"}
                     yield f"event: aborted\ndata: {json.dumps(data)}\n\n"
