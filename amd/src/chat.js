@@ -73,6 +73,8 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
 
         // Conversation list clicks (delegated)
         $(document).on('click', '.hermes-conv-item', function(e) {
+            // Don't navigate when in bulk mode — let the bulk handler manage selection
+            if ($(this).hasClass('hermes-bulk-mode')) return;
             // Don't navigate when clicking action buttons or checkboxes
             if ($(e.target).closest('.hermes-conv-rename, .hermes-conv-duplicate, .hermes-conv-checkbox').length) return;
             var convId = $(this).data('conv-id');
