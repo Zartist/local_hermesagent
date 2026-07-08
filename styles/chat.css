@@ -500,8 +500,8 @@
     height: calc(100vh - 160px);
   }
   .hermes-sidebar {
-    width: 180px;
-    min-width: 180px;
+    width: 220px;
+    min-width: 220px;
   }
   .hermes-message {
     max-width: 85%;
@@ -510,7 +510,7 @@
     max-width: 100%;
   }
   .hermes-conv-item {
-    font-size: 12px;
+    font-size: 13px;
     padding: 8px 10px;
   }
 }
