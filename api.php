@@ -46,7 +46,7 @@ $PAGE->set_context(context_system::instance());
 // Stream is GET-only (read-only SSE) so we skip sesskey to avoid Moodle's single-use conflict.
 // Abort is a lightweight signal, no sesskey needed.
 // Status is read-only health check, no sesskey needed.
-$action = required_param('action', PARAM_ALPHA);
+$action = required_param('action', PARAM_ALPHANUMEXT);  // allows underscores
 if ($action !== 'stream' && $action !== 'abort' && $action !== 'status' && $action !== 'permission_response') {
     require_sesskey();
 }
