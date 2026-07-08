@@ -6,7 +6,7 @@
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], function($, ajax, Str, mathjaxLoader) {
+define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax, mathjaxLoader) {
     'use strict';
 
     var config = {};
@@ -133,7 +133,6 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
 
         // --- Bulk selection mode ---
-        var bulkMode = false;
 
         // Long-press or right-click on a conv item enters bulk mode
         var pressTimer;
@@ -158,13 +157,11 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
 
         function enterBulkMode() {
-            bulkMode = true;
             $('.hermes-conv-checkbox').show();
             $('.hermes-conv-item').addClass('hermes-bulk-mode');
         }
 
         function exitBulkMode() {
-            bulkMode = false;
             $('.hermes-conv-checkbox').hide().prop('checked', false);
             $('.hermes-conv-item').removeClass('hermes-bulk-mode');
             $('.hermes-bulk-actions').hide();

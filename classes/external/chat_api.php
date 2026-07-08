@@ -6,7 +6,6 @@ use external_function_parameters;
 use external_single_structure;
 use external_multiple_structure;
 use external_value;
-use external_optional_param;
 use context_system;
 
 defined('MOODLE_INTERNAL') || die();
@@ -131,6 +130,8 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
     }
 
     public static function tool_response($messageid, $approved) {
+        global $USER;
+
         self::validate_parameters(self::tool_response_parameters(), [
             'messageid' => $messageid,
             'approved' => $approved,
@@ -531,7 +532,7 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
     }
 
     /**
-     * Upload a pasted image. Saves to Moodle's file area and returns a URL.
+     * Upload a pasted image. Saves to local filesystem and returns a URL + path.
      */
     public static function upload_image_parameters() {
         return new external_function_parameters([

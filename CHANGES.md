@@ -5,6 +5,120 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.4.0] — 2026-07-08
+
+### Added
+
+#### Conversation management
+- **Bulk delete / duplicate** — long-press (mobile) or right-click (desktop)
+  on a conversation in the sidebar to enter selection mode. Checkboxes
+  appear on each conversation; tap to toggle. Bulk Delete (with
+  confirmation) and Bulk Duplicate buttons appear in a toolbar. ✕ exits
+  selection mode.
+- **Per-conversation duplicate button** (⧉) — visible on hover, creates a
+  full copy of the conversation with all messages.
+- New web services: `bulk_delete_conversations`, `duplicate_conversation`.
+
+#### Quote / reply to messages
+- **↩ Quote button** on every message bubble — click to show a visual
+  quote preview bar above the input with "Quoting Hermes:" or "Quoting
+  me:" and the first 200 characters of the quoted message.
+- When sent, the quote is prepended as a markdown blockquote
+  (`> **Hermes said:**\n> ...`) so Hermes sees the context.
+- ✕ on the quote bar cancels. Quote auto-clears after sending.
+- **Blockquote styling** — indigo left border (3px), light gray
+  background, works in both user and assistant bubbles.
+
+#### Edit / delete individual messages
+- **✎ Edit button** — click to inline-edit: message content turns into a
+  textarea with Save/Cancel buttons. Markdown re-renders after saving.
+- **🗑 Delete button** — deletes with confirmation, message fades out.
+- New web services: `edit_message`, `delete_message`.
+- Message IDs are now passed from `send_message` → `addUserMessage` so
+  edit/delete buttons have correct DB IDs. The `send_message` web service
+  is called first (returns `messageid`), then the SSE stream opens.
+
+#### Image paste support
+- **Ctrl+V an image** into the input textarea — automatically uploads and
+  inserts a markdown image link.
+- Images saved as flat files to `/var/www/moodledata/.hermes/images/`
+  (owned by `www-data`, 0644 permissions).
+- **`image.php`** — serves images for browser display (requires login,
+  no pluginfile complexity). `renderMarkdown` rewrites local file paths
+  to `image.php?f=filename` URLs for display.
+- The markdown sent to Hermes uses the **local filesystem path** so
+  Hermes can read the file directly via `vision_analyze` — no
+  authentication needed (previous pluginfile.php approach required
+  session cookies Hermes couldn't provide).
+- New web service: `upload_image`.
+- 10MB size limit per image.
+
+#### Collapsible + resizable sidebar
+- **◀ Collapse button** in sidebar header — hides sidebar completely.
+- **▶ Expand button** appears when collapsed — click to restore.
+- **Drag handle** (6px gray bar) between sidebar and chat area — drag to
+  resize from 160px to 500px. Turns indigo on hover/drag.
+- Sidebar width **persists** across page loads via `localStorage`.
+- **Touch support** for resizing on tablets.
+- Mobile (< 600px): resize/collapse buttons hidden, uses header-tap
+  to expand/collapse (sidebar shows as 42px tappable header bar).
+
+#### Per-message copy & text selection
+- **📋 Copy button** on every message — copies raw markdown/text to
+  clipboard (navigator.clipboard + execCommand fallback).
+- **Double-click** message content to select all text in that bubble.
+- Normal click-drag text selection for partial copying.
+
+#### Vision support
+- **`auxiliary.vision` configured** in `config.yaml` to use the custom
+  provider (`custom:Socratic.cs.cityu.edu.hk` / `Socrates` model).
+  Previously set to `auto` which couldn't detect the custom provider,
+  causing "No LLM provider configured for task=vision" errors.
+- `bootstrap.sh` updated to set this on future deploys.
+
+### Fixed
+
+- **`local_hermesagent_get_bridge_port()` undefined** — `lib.php` was
+  accidentally overwritten with only the `pluginfile()` function,
+  deleting all 11 helper functions. Restored all original functions and
+  appended `pluginfile()` at the end.
+- **`services.php` double backslashes** — 6 service entries had
+  `\\\\` (double-escaped) instead of `\\` in the classname field. This
+  prevented Moodle from finding the class.
+- **`tool_response()` missing `global $USER`** — would fail with
+  "undefined variable" when checking permissions.
+- **Markdown not rendering after sending** — user messages were rendered
+  with `escapeHtml()` (plain text), so blockquote `>` syntax showed as
+  raw characters. Now both user and assistant messages go through
+  `renderMarkdown()`.
+- **Closure bug in `renderMessages`** — async `renderMarkdown().then()`
+  callbacks captured loop variables by reference, so all messages would
+  render into the last element. Fixed with IIFE wrapper.
+- **Resize handle invisible** — was inside the sidebar div (child, not
+  sibling); the sidebar's flex/overflow layout swallowed it. Moved
+  outside the sidebar closing tag. Also gave it a visible background.
+- **Mobile sidebar not tappable** — `max-height: 0` hid the header too.
+  Changed to `max-height: 42px` so the header is always visible.
+- **Removed unused `external_optional_param` import** from `chat_api.php`.
+- **Removed unused `core/str` import** from `chat.js` AMD define().
+- **Removed dead `bulkMode` variable** — was set but never read; the
+  `.hermes-bulk-mode` CSS class on items is the actual state indicator.
+- **Removed dead tool confirmation modal** HTML from `chat.php` (was
+  replaced by inline permission buttons in 0.3.11).
+
+### Changed
+
+- `sendMessage()` now calls `send_message` web service first to get the
+  message ID, then opens the SSE stream. Previously `streamResponse()`
+  called `send_message` internally.
+- `saveAssistantResponse()` now returns the ajax promise so the `done`
+  event handler can use the returned `messageid` for action buttons.
+- `buildMessageActions()` helper centralizes action button HTML
+  generation (reply, copy, edit, delete) for all message render paths.
+- Sidebar `min-width` changed from 260px to 160px for more flexibility.
+
+---
+
 ## [0.3.11] — 2026-07-08
 
 ### Added
