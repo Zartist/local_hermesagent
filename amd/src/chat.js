@@ -134,11 +134,9 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
             });
         });
 
-        // --- Conversation search (expandable) ---
+        // --- Conversation search ---
         var $searchInput = $('#hermes-conv-search');
         var $searchClear = $('#hermes-search-clear');
-        var $searchToggle = $('#hermes-search-toggle');
-        var $searchContainer = $('.hermes-search-container');
 
         function runSearch() {
             var query = $searchInput.val().toLowerCase().trim();
@@ -162,27 +160,6 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
             }
         }
 
-        function collapseSearch() {
-            $searchContainer.removeClass('hermes-search-expanded');
-        }
-
-        function expandSearch() {
-            $searchContainer.addClass('hermes-search-expanded');
-            setTimeout(function() { $searchInput.focus(); }, 50);
-        }
-
-        // Toggle icon: expand on click
-        $searchToggle.on('click', function() {
-            if ($searchContainer.hasClass('hermes-search-expanded')) {
-                // Already expanded — if empty, collapse; otherwise keep open
-                if (!$searchInput.val().trim()) {
-                    collapseSearch();
-                }
-            } else {
-                expandSearch();
-            }
-        });
-
         $searchInput.on('input', runSearch);
 
         // Clear button
@@ -191,19 +168,12 @@ define(['jquery', 'core/ajax', 'filter_mathjaxloader/loader'], function($, ajax,
             runSearch();
         });
 
-        // Escape clears search and collapses if empty
+        // Escape clears search
         $searchInput.on('keydown', function(e) {
             if (e.key === 'Escape') {
                 $searchInput.val('');
                 runSearch();
-                collapseSearch();
-            }
-        });
-
-        // Blur: collapse if empty
-        $searchInput.on('blur', function() {
-            if (!$searchInput.val().trim()) {
-                collapseSearch();
+                this.blur();
             }
         });
 
