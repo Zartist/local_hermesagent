@@ -208,6 +208,11 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
 
         $conv = $DB->get_record('local_hermesagent_conversations', ['id' => $params['conversationid'], 'usermodified' => $USER->id]);
         if ($conv) {
+            // Delete associated image files before removing DB records
+            $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $params['conversationid']]);
+            foreach ($messages as $msg) {
+                self::delete_message_images($msg->content);
+            }
             $DB->delete_records('local_hermesagent_messages', ['conversationid' => $params['conversationid']]);
             $DB->delete_records('local_hermesagent_conversations', ['id' => $params['conversationid']]);
         }
@@ -359,6 +364,11 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
                 'usermodified' => $USER->id,
             ]);
             if ($conv) {
+                // Delete associated image files before removing DB records
+                $messages = $DB->get_records('local_hermesagent_messages', ['conversationid' => $cid]);
+                foreach ($messages as $msg) {
+                    self::delete_message_images($msg->content);
+                }
                 $DB->delete_records('local_hermesagent_messages', ['conversationid' => $cid]);
                 $DB->delete_records('local_hermesagent_conversations', ['id' => $cid]);
                 $deleted++;
@@ -471,6 +481,9 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
             throw new \moodle_exception('invalidconversation');
         }
 
+        // Delete images from the old content that are no longer referenced
+        self::delete_message_images($msg->content);
+
         $msg->content = $params['content'];
         $msg->timemodified = time();
         $DB->update_record('local_hermesagent_messages', $msg);
@@ -517,6 +530,8 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
             throw new \moodle_exception('invalidconversation');
         }
 
+        // Delete associated image files before removing the DB record
+        self::delete_message_images($msg->content);
         $DB->delete_records('local_hermesagent_messages', ['id' => $params['messageid']]);
         // Also delete any tool logs for this message
         $DB->delete_records('local_hermesagent_tool_log', ['messageid' => $params['messageid']]);
@@ -599,6 +614,38 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
             'local_path' => new external_value(PARAM_RAW, 'Local filesystem path for Hermes to read'),
             'itemid' => new external_value(PARAM_INT, 'File item ID'),
         ]);
+    }
+
+    /**
+     * Delete image files referenced in a message's content.
+     * Scans for markdown image syntax pointing to the local images directory.
+     *
+     * @param string $content Message content (markdown)
+     */
+    private static function delete_message_images($content) {
+        if (!$content) return;
+
+        // Match ![alt](/var/www/moodledata/.hermes/images/filename.ext)
+        if (!preg_match_all('/!\[[^\]]*\]\(([^)]+)\)/', $content, $matches)) {
+            return;
+        }
+
+        $hermes_home = getenv('HERMES_HOME') ?: '/var/www/moodledata/.hermes';
+        $img_dir = $hermes_home . '/images';
+
+        foreach ($matches[1] as $path) {
+            // Only delete files in our images directory
+            if (strpos($path, $img_dir) === 0) {
+                $filename = basename($path);
+                // Sanitize: only allow alphanumeric, underscore, hyphen, dot
+                if (preg_match('/^[a-zA-Z0-9_\-.]+$/', $filename)) {
+                    $filepath = $img_dir . '/' . $filename;
+                    if (file_exists($filepath)) {
+                        @unlink($filepath);
+                    }
+                }
+            }
+        }
     }
 
 
