@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -87,11 +88,11 @@ class ACPProcess:
         env["HERMES_HOME"] = HERMES_HOME_ENV
 
         try:
-            self.proc = __import__("subprocess").Popen(
+            self.proc = subprocess.Popen(
                 [str(HERMES_BIN), "acp"],
-                stdin=__import__("subprocess").PIPE,
-                stdout=__import__("subprocess").PIPE,
-                stderr=__import__("subprocess").PIPE,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
                 env=env,
@@ -167,6 +168,19 @@ class ACPProcess:
             self._next_id += 1
             return self._next_id
 
+    def _send_jsonrpc(self, msg):
+        """Write a JSON-RPC message to the ACP process stdin."""
+        self.proc.stdin.write(json.dumps(msg) + "\n")
+        self.proc.stdin.flush()
+
+    def _send_jsonrpc_error(self, msg_id, code, message):
+        """Send a JSON-RPC error response to the ACP process."""
+        self._send_jsonrpc({
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "error": {"code": code, "message": message},
+        })
+
     def _request(self, method, params, timeout=60, text_parts=None, reasoning_parts=None, session_id_filter=None):
         """Send a JSON-RPC request and wait for response.
 
@@ -211,50 +225,37 @@ class ACPProcess:
         raise TimeoutError(f"Timed out waiting for ACP response to {method}")
 
     def _handle_notification(self, msg, text_parts, reasoning_parts, session_id_filter):
-        """Handle notifications and session/update events. Returns True if consumed."""
-        msg_id = msg.get("id")
+        """Handle notifications during _request(). Returns True if consumed.
+
+        Only called from the non-streaming _request() path (initialize, session/new).
+        The streaming send_prompt_streaming() path handles notifications itself.
+        """
         method = msg.get("method")
 
-        # session/update notifications - these are the streaming chunks
+        # session/update notifications — accumulate text/reasoning
         if method == "session/update":
             params = msg.get("params", {})
             update = params.get("update", {})
             kind = str(update.get("sessionUpdate", "")).strip()
             content = update.get("content", {})
-            text = ""
-            if isinstance(content, dict):
-                text = str(content.get("text", ""))
+            text = str(content.get("text", "")) if isinstance(content, dict) else ""
 
-            if kind == "agent_message_chunk" and text:
-                if text_parts is not None:
-                    text_parts.append(text)
-                log.debug("agent_message_chunk: %s", text[:200])
-            elif kind == "agent_thought_chunk" and text:
-                if reasoning_parts is not None:
-                    reasoning_parts.append(text)
-                log.debug("agent_thought_chunk: %s", text[:200])
+            if kind == "agent_message_chunk" and text and text_parts is not None:
+                text_parts.append(text)
+            elif kind == "agent_thought_chunk" and text and reasoning_parts is not None:
+                reasoning_parts.append(text)
             return True
 
-        # session/request_permission - let the streaming loop handle it
-        # (the streaming loop yields a permission event to the browser)
-        if method == "session/request_permission" and msg_id is not None:
-            log.info("Permission request %s — forwarding to streaming loop", msg_id)
-            return False  # Don't consume; let the streaming loop handle it
+        # session/request_permission — not expected during initialize/session/new;
+        # let the caller handle it if it arrives
+        if method == "session/request_permission":
+            return False
 
-        # fs/* and terminal/* requests from ACP - respond with error if not handled
-        if msg_id is not None and method and ("/" in method):
-            log.warning("Unhandled ACP method: %s (id=%s)", method, msg_id)
-            response = {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "error": {
-                    "code": -32601,
-                    "message": f"Method '{method}' not supported by this bridge",
-                },
-            }
-            self.proc.stdin.write(json.dumps(response) + "\n")
-            self.proc.stdin.flush()
-            return True
+        # Unknown requests with an id — respond with error
+        msg_id = msg.get("id")
+        if msg_id is not None and method and "/" in method:
+            log.warning("Unhandled ACP method in _request: %s (id=%s)", method, msg_id)
+            self._send_jsonrpc_error(msg_id, -32601, f"Method '{method}' not supported")
 
         return False
 
@@ -410,17 +411,8 @@ class ACPProcess:
 
             # Handle fs/* and terminal/* requests
             if msg_id is not None and method and "/" in method:
-                log.warning("Unhandled ACP method: %s (id=%s)", method, msg_id)
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": msg_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method '{method}' not supported by this bridge",
-                    },
-                }
-                self.proc.stdin.write(json.dumps(response) + "\n")
-                self.proc.stdin.flush()
+                log.warning("Unhandled ACP method in stream: %s (id=%s)", method, msg_id)
+                self._send_jsonrpc_error(msg_id, -32601, f"Method '{method}' not supported")
                 continue
 
             # Look for our response (has matching id)
@@ -698,8 +690,7 @@ async def session_permission(request: Request):
         "id": permission_id,
         "result": {"outcome": outcome},
     }
-    acp.proc.stdin.write(json.dumps(response) + "\n")
-    acp.proc.stdin.flush()
+    acp._send_jsonrpc(response)
     log.info("Permission %s %s by user", permission_id, "approved" if approved else "rejected")
     return {"status": "ok", "approved": approved}
 

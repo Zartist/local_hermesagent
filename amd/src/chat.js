@@ -6,27 +6,41 @@
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], function($, ajax, Str, mathjaxLoader){
-    console.log('[Hermes-JS] module loaded');
+define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], function($, ajax, Str, mathjaxLoader) {
+    'use strict';
+
     var config = {};
-    var currentMessage = null;
-    var currentPermissionId = null;
     var isStreaming = false;
+    var eventSourceRef = null;
+    var msgCounter = 0;
+    var shouldAutoScroll = true;
+    var markedInstance = null;
+    var markedPromise = null;
+    var mathjaxConfigured = false;
+
+    // Math delimiter placeholders (unicode private-use area)
+    var BS = String.fromCharCode(92); // backslash
+    var MATH_OPEN = String.fromCharCode(57344);
+    var MATH_CLOSE = String.fromCharCode(57345);
+
+    // ---------------------------------------------------------------------------
+    // Initialization
+    // ---------------------------------------------------------------------------
 
     /**
-     * Initialize the chat
+     * Initialize the chat module.
+     * Reads config from #hermes-config data attribute, sets up event listeners,
+     * and loads conversation history.
      */
     var init = function() {
         $(document).ready(function() {
-            // Read config from data attribute on the page
             var $configEl = $('#hermes-config');
             if ($configEl.length) {
-                // Use raw attribute and decode HTML entities (html_writer escapes JSON)
                 try {
                     var rawConfig = $configEl[0].getAttribute('data-config');
-                    var decodedConfig = $('<textarea>').html(rawConfig).text();
-                    config = $.parseJSON(decodedConfig);
-                } catch(e) {
+                    var decoded = $('<textarea>').html(rawConfig).text();
+                    config = $.parseJSON(decoded);
+                } catch (e) {
                     console.error('[Hermes] Failed to parse config:', e);
                 }
             }
@@ -35,24 +49,13 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
     };
 
-    /**
-     * Set configuration from PHP
-     */
-    var setConfig = function(cfg) {
-        config = JSON.parse(typeof cfg === 'string' ? cfg : JSON.stringify(cfg));
-    };
+    // ---------------------------------------------------------------------------
+    // Event listeners
+    // ---------------------------------------------------------------------------
 
-
-    /**
-     * Setup event listeners
-     */
     var setupEventListeners = function() {
-        // Send button
-        $('#hermes-send-btn').on('click', function() {
-            sendMessage();
-        });
+        $('#hermes-send-btn').on('click', sendMessage);
 
-        // Enter key to send (Shift+Enter for newline)
         $('#hermes-message-input').on('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -65,32 +68,26 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             $('.hermes-sidebar').toggleClass('hermes-sidebar-open');
         });
 
-        // Conversation list clicks
+        // Conversation list clicks (delegated)
         $(document).on('click', '.hermes-conv-item', function(e) {
-            // Don't navigate if clicking the rename button
-            if ($(e.target).closest('.hermes-conv-rename').length) {
-                return;
-            }
+            if ($(e.target).closest('.hermes-conv-rename').length) return;
             var convId = $(this).data('conv-id');
             window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?conversationid=' + convId;
         });
 
-        // New conversation link
         $('#hermes-new-conv').on('click', function(e) {
             e.preventDefault();
             window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?action=new';
         });
 
-        // Tool permission actions — delegated for inline buttons
+        // Tool permission — delegated for inline buttons
         $(document).on('click', '.hermes-perm-approve', function() {
-            var $container = $(this).closest('.hermes-perm-actions');
-            var permId = $container.data('perm-id');
-            handlePermissionResponse(permId, true, $container);
+            var $c = $(this).closest('.hermes-perm-actions');
+            handlePermissionResponse($c.data('perm-id'), true, $c);
         });
         $(document).on('click', '.hermes-perm-reject', function() {
-            var $container = $(this).closest('.hermes-perm-actions');
-            var permId = $container.data('perm-id');
-            handlePermissionResponse(permId, false, $container);
+            var $c = $(this).closest('.hermes-perm-actions');
+            handlePermissionResponse($c.data('perm-id'), false, $c);
         });
 
         // Rename conversation
@@ -99,23 +96,16 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             var $btn = $(this);
             var convId = $btn.data('conv-id');
             var currentName = $btn.data('conv-name');
-
             var newName = prompt('Rename conversation:', currentName);
             if (newName && $.trim(newName) && $.trim(newName) !== currentName) {
-                var renamePromises = ajax.call([{
+                newName = $.trim(newName);
+                ajax.call([{
                     methodname: 'local_hermesagent_rename_conversation',
-                    args: {
-                        conversationid: convId,
-                        name: $.trim(newName)
-                    }
-                }]);
-
-                renamePromises[0].then(function() {
-                    // Update the conversation name in the list item
+                    args: { conversationid: convId, name: newName }
+                }])[0].then(function() {
                     var $li = $btn.closest('.hermes-conv-item');
-                    $li.find('.hermes-conv-name').text($.trim(newName));
-                    $btn.data('conv-name', $.trim(newName));
-                    $li.data('conv-name', $.trim(newName));
+                    $li.find('.hermes-conv-name').text(newName);
+                    $btn.data('conv-name', newName);
                 }).catch(function(ex) {
                     console.error('[Hermes] rename failed:', ex);
                 });
@@ -123,56 +113,29 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
     };
 
-    /**
-     * Load conversation history
-     */
-    var loadHistory = function() {
-        var promises = ajax.call([{
-            methodname: 'local_hermesagent_get_history',
-            args: { conversationid: config.conversationid }
-        }]);
+    // ---------------------------------------------------------------------------
+    // Message sending & streaming
+    // ---------------------------------------------------------------------------
 
-        promises[0].then(function(data) {
-            var messages = data.messages || [];
-            renderMessages(messages);
-            scrollToEnd();
-        }).catch(function(ex) {
-            console.error('[Hermes] loadHistory failed:', ex);
-            $('#hermes-chat-area').append('<div class="hermes-error">Failed to load history.</div>');
-        });
-    };
-
-    /**
-     * Send a message (or handle slash commands)
-     */
     var sendMessage = function() {
         var input = $('#hermes-message-input');
         var message = input.val().trim();
         if (!message || isStreaming) return;
 
-        // Slash command handling
         if (message.startsWith('/')) {
             input.val('');
             handleSlashCommand(message);
             return;
         }
 
-        // Store message BEFORE clearing
         input.data('lastmessage', message);
         input.val('');
         addUserMessage(message);
-
-        // Start streaming response
         streamResponse(config.conversationid);
     };
 
-    /**
-     * Handle slash commands
-     */
     var handleSlashCommand = function(cmd) {
-        var parts = cmd.trim().split(/\s+/);
-        var command = parts[0].toLowerCase();
-
+        var command = cmd.trim().split(/\s+/)[0].toLowerCase();
         switch (command) {
             case '/stop':
                 stopStreaming();
@@ -188,18 +151,13 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 checkBridgeStatus();
                 break;
             case '/help':
-                addSystemMessage('Slash commands: /stop (abort response), /new (new conversation), /clear (clear view), /status (bridge health), /help (this message)');
+                addSystemMessage('Commands: /stop (abort), /new (new conversation), ' +
+                    '/clear (clear view), /status (bridge health), /help');
                 break;
             default:
-                addSystemMessage('Unknown command: ' + escapeHtml(command) + ' — type /help for available commands.');
-                break;
+                addSystemMessage('Unknown command: ' + escapeHtml(command) + ' — type /help.');
         }
     };
-
-    /**
-     * Stop streaming: close EventSource and signal bridge to abort
-     */
-    var eventSourceRef = null;  // Global reference so /stop can close it
 
     var stopStreaming = function() {
         if (eventSourceRef) {
@@ -210,327 +168,161 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         $('#hermes-send-btn').prop('disabled', false);
         $('.hermes-spinner').remove();
         $('.hermes-streaming').removeClass('hermes-streaming');
-
-        // Signal bridge to abort
         $.ajax({
             url: config.api_url + '?action=abort&conversationid=' + config.conversationid,
             type: 'POST',
-            timeout: 3000,
-        }).fail(function() {
-            // Best effort — already closed client-side
-        });
-
+            timeout: 3000
+        }).fail(function() { /* best effort */ });
         addSystemMessage('Response stopped.');
     };
 
-    /**
-     * Add user message to UI
-     */
-    var addUserMessage = function(content) {
-        var html = '<div class="hermes-message hermes-user-message">';
-        html += '<div class="hermes-avatar hermes-user-avatar">U</div>';
-        html += '<div class="hermes-bubble hermes-user-bubble">';
-        html += '<div class="hermes-content">' + escapeHtml(content) + '</div>';
-        html += '</div></div>';
-
-        $('#hermes-chat-area').append(html);
-        scrollToEnd();
-    };
-
-    var msgCounter = 0;
-
-    /**
-     * Add assistant message to UI
-     */
-    var addAssistantMessage = function() {
-        msgCounter++;
-        var msgId = 'hermes-assistant-msg-' + msgCounter;
-        var contentId = 'hermes-assistant-content-' + msgCounter;
-        var spinnerId = 'hermes-spinner-' + msgCounter;
-
-        var html = '<div class="hermes-message hermes-assistant-message" id="' + msgId + '">';
-        html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
-        html += '<div class="hermes-bubble hermes-assistant-bubble">';
-        html += '<div class="hermes-content hermes-streaming" id="' + contentId + '"></div>';
-        html += '<div class="hermes-spinner" id="' + spinnerId + '"></div>';
-        html += '</div></div>';
-
-        $('#hermes-chat-area').append(html);
-        scrollToEnd();
-        return $('#' + contentId);
-    };
-
-    /**
-     * Stream response from ACP bridge
-     */
     var streamResponse = function(conversationid) {
         isStreaming = true;
         $('#hermes-send-btn').prop('disabled', true);
 
         var messageEl = addAssistantMessage();
-        var currentSpinnerId = 'hermes-spinner-' + msgCounter;
-
-        // Track the raw markdown from the LLM (not the rendered HTML)
+        var spinnerId = 'hermes-spinner-' + msgCounter;
         var rawMarkdown = '';
-
-        // Get the message that was stored
         var message = $('#hermes-message-input').data('lastmessage') || '';
 
-        // First save the user message via web service
-        var sendPromises = ajax.call([{
+        ajax.call([{
             methodname: 'local_hermesagent_send_message',
-            args: {
-                conversationid: conversationid,
-                message: message
-            }
-        }]);
-
-        sendPromises[0].then(function() {
-            var eventSource = new EventSource(
-                M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream&conversationid=' + conversationid + '&sesskey=' + config.sesskey
+            args: { conversationid: conversationid, message: message }
+        }])[0].then(function() {
+            var es = new EventSource(
+                M.cfg.wwwroot + '/local/hermesagent/api.php?action=stream' +
+                '&conversationid=' + conversationid + '&sesskey=' + config.sesskey
             );
-            // Track reference so /stop can close it
-            eventSourceRef = eventSource;
+            eventSourceRef = es;
 
-        // Handle the 'message' event from api.php SSE stream
-        eventSource.addEventListener('message', function(e) {
-            console.log('[Hermes-SSE] message event received, raw:', e.data.substring(0, 200));
-            try {
-                var data = JSON.parse(e.data);
-                console.log('[Hermes-SSE] parsed message - type:', data.type, 'delta_len:', (data.delta||'').length, 'full_len:', (data.full||'').length);
-                if (data.full === undefined) return;
-                
-                // Handle reasoning separately - show as collapsible thinking
-                if (data.type === 'reasoning') {
-                    // Add reasoning to a collapsible section
-                    var reasoningId = 'hermes-reasoning-' + msgCounter;
-                    if (!$('#' + reasoningId).length) {
-                        var reasoningHtml = '<details class="hermes-reasoning" id="' + reasoningId + '">';
-                        reasoningHtml += '<summary class="hermes-reasoning-summary">Thinking...</summary>';
-                        reasoningHtml += '<div class="hermes-reasoning-content" id="' + reasoningId + '-content"></div>';
-                        reasoningHtml += '</details>';
-                        messageEl.after(reasoningHtml);
+            es.addEventListener('message', function(e) {
+                try {
+                    var data = JSON.parse(e.data);
+                    if (data.full === undefined) return;
+
+                    if (data.type === 'reasoning') {
+                        var rid = 'hermes-reasoning-' + msgCounter;
+                        if (!$('#' + rid).length) {
+                            messageEl.after(
+                                '<details class="hermes-reasoning" id="' + rid + '">' +
+                                '<summary class="hermes-reasoning-summary">Thinking...</summary>' +
+                                '<div class="hermes-reasoning-content" id="' + rid + '-content"></div>' +
+                                '</details>'
+                            );
+                        }
+                        setMarkdownContent($('#' + rid + '-content'), data.full);
+                        scrollToEnd();
+                        return;
                     }
-                    // Update reasoning content
-                    var $reasoningContent = $('#' + reasoningId + '-content');
-                    setMarkdownContent($reasoningContent, data.full);
+
+                    rawMarkdown = data.full;
+                    setMarkdownContent(messageEl, data.full);
                     scrollToEnd();
-                    return; // Don't accumulate reasoning in rawMarkdown
+                } catch (ex) {
+                    console.error('[Hermes] SSE parse error:', ex);
                 }
-                
-                // Regular delta content - this is the visible answer
-                rawMarkdown = data.full;
-                setMarkdownContent(messageEl, data.full);
-                scrollToEnd();
-            } catch(ex) {
-                console.error('SSE parse error:', ex, e.data);
-            }
-        });
-
-        // Handle session event (new ACP session started)
-        eventSource.addEventListener('session', function(e) {
-            // Session started — nothing special to do on client
-        });
-
-        eventSource.addEventListener('tool_call', function(e) {
-            console.log('[Hermes-SSE] tool_call event received, raw:', e.data.substring(0, 400));
-            var data = JSON.parse(e.data);
-            console.log('[Hermes-SSE] parsed tool_call - name:', data.tool_call?.name, 'has_result:', !!data.tool_call?.result, 'status:', data.tool_call?.status);
-            // Show tool call as collapsible section in chat
-            addToolCallToChat(data.tool_call);
-        });
-
-        // Handle permission request — show inline approve/reject in chat
-        eventSource.addEventListener('permission', function(e) {
-            console.log('[Hermes-SSE] permission event received');
-            var data = JSON.parse(e.data);
-            addPermissionToChat(data);
-        });
-
-        eventSource.addEventListener('error', function(e) {
-            console.error('[Hermes-SSE] Error:', e);
-            console.error('[Hermes-SSE] EventSource readyState:', eventSource.readyState);
-            if (eventSource.url) {
-                console.error('URL:', eventSource.url);
-            }
-            eventSource.close();
-            isStreaming = false;
-            $('#hermes-send-btn').prop('disabled', false);
-            $('#' + currentSpinnerId).remove();
-
-            // Save partial content — use raw markdown, not rendered HTML text
-            if (rawMarkdown) {
-                var savePromises = ajax.call([{
-                    methodname: 'local_hermesagent_save_assistant_response',
-                    args: {
-                        conversationid: conversationid,
-                        content: rawMarkdown
-                    }
-                }]);
-                savePromises[0].catch(function(ex) {
-                    console.error('[Hermes] Failed to save partial response:', ex);
-                });
-            }
-
-            messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
-        });
-
-        eventSource.addEventListener('done', function(e) {
-            eventSourceRef = null;
-            console.log('[Hermes-SSE] done event received');
-            eventSource.close();
-            isStreaming = false;
-            $('#hermes-send-btn').prop('disabled', false);
-            $('#' + currentSpinnerId).remove();
-            messageEl.removeClass('hermes-streaming');
-
-            // Save the final assistant response — use raw markdown from LLM
-            // NOT messageEl.text() which strips all HTML tags
-            var finalContent = rawMarkdown;
-            var savePromises = ajax.call([{
-                methodname: 'local_hermesagent_save_assistant_response',
-                args: {
-                    conversationid: conversationid,
-                    content: finalContent
-                }
-            }]);
-            savePromises[0].catch(function(ex) {
-                console.error('[Hermes] Failed to save assistant response:', ex);
             });
-        });
 
-        eventSource.addEventListener('aborted', function(e) {
-            eventSourceRef = null;
-            console.log('[Hermes-SSE] aborted event received');
-            eventSource.close();
-            isStreaming = false;
-            $('#hermes-send-btn').prop('disabled', false);
-            $('#' + currentSpinnerId).remove();
-            messageEl.removeClass('hermes-streaming');
-            addSystemMessage('Response stopped by user.');
-        });
+            es.addEventListener('tool_call', function(e) {
+                try {
+                    addToolCallToChat(JSON.parse(e.data).tool_call);
+                } catch (ex) {
+                    console.error('[Hermes] tool_call parse error:', ex);
+                }
+            });
+
+            es.addEventListener('permission', function(e) {
+                try {
+                    addPermissionToChat(JSON.parse(e.data));
+                } catch (ex) {
+                    console.error('[Hermes] permission parse error:', ex);
+                }
+            });
+
+            es.addEventListener('error', function() {
+                es.close();
+                eventSourceRef = null;
+                finishStreaming(spinnerId);
+                if (rawMarkdown) {
+                    saveAssistantResponse(conversationid, rawMarkdown);
+                }
+                messageEl.after('<div class="hermes-error">Connection error — check console for details.</div>');
+            });
+
+            es.addEventListener('done', function(e) {
+                es.close();
+                eventSourceRef = null;
+                finishStreaming(spinnerId);
+                saveAssistantResponse(conversationid, rawMarkdown);
+            });
+
+            es.addEventListener('aborted', function() {
+                es.close();
+                eventSourceRef = null;
+                finishStreaming(spinnerId);
+                addSystemMessage('Response stopped by user.');
+            });
+
         }).catch(function(ex) {
             console.error('[Hermes] streamResponse error:', ex);
-            isStreaming = false;
-            $('#hermes-send-btn').prop('disabled', false);
-            $('#' + currentSpinnerId).remove();
+            finishStreaming(spinnerId);
         });
     };
 
     /**
-     * Add tool call result to chat as a collapsible section
+     * Reset streaming UI state (re-enable send button, remove spinner).
      */
-    var addToolCallToChat = function(tc) {
-        console.log('[Hermes-UI] addToolCallToChat called - name:', tc?.name, 'has_result:', !!tc?.result, 'result_type:', typeof tc?.result, 'status:', tc?.status);
-        var msgId = 'hermes-tool-call-' + (msgCounter);
-        var resultText = '';
-        // Guard: result must be a real object with actual data, not an error object
-        var hasResult = tc.result && typeof tc.result === 'object' && !tc.result.error && Object.keys(tc.result).length > 0;
-        if (hasResult) {
-            if (tc.result.rows) {
-                resultText = buildTableMarkdown(tc.result);
-            } else {
-                resultText = JSON.stringify(tc.result, null, 2);
-            }
-        }
-
-        var html = '<div class="hermes-message hermes-assistant-message hermes-tool-call" id="' + msgId + '">';
-        html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
-        html += '<div class="hermes-bubble hermes-assistant-bubble hermes-tool-bubble">';
-        html += '<details class="hermes-tool-details">';
-        html += '<summary class="hermes-tool-summary">';
-        html += '<span class="hermes-tool-icon">&#9881;</span> ';
-        html += escapeHtml(tc.name);
-        html += ' <span class="hermes-tool-status">';
-        if (tc.status === 'completed') {
-            html += '<span class="text-success">completed</span>';
-        } else {
-            html += '<span class="text-warning">executing</span>';
-        }
-        html += '</span>';
-        html += '</summary>';
-        html += '<div class="hermes-tool-input">';
-        html += '<strong>Input:</strong> ';
-        html += '<code>' + escapeHtml(JSON.stringify(tc.input, null, 2)) + '</code>';
-        html += '</div>';
-        if (hasResult) {
-            html += '<div class="hermes-tool-result">';
-            html += '<strong>Result:</strong> ';
-            html += '<pre>' + escapeHtml(resultText) + '</pre>';
-            html += '</div>';
-        } else if (tc.result && tc.result.error) {
-            html += '<div class="hermes-tool-result" style="color: red;">';
-            html += '<strong>Error:</strong> ' + escapeHtml(tc.result.error);
-            html += '</div>';
-        }
-        html += '</details>';
-        html += '</div></div>';
-
-        $('#hermes-chat-area').append(html);
-        scrollToEnd();
+    var finishStreaming = function(spinnerId) {
+        isStreaming = false;
+        $('#hermes-send-btn').prop('disabled', false);
+        $('#' + spinnerId).remove();
+        $('.hermes-streaming').removeClass('hermes-streaming');
     };
 
     /**
-     * Build a simple markdown table from DB query result
+     * Save assistant response to DB via web service.
      */
-    var buildTableMarkdown = function(result) {
-        if (!result.rows || result.rows.length === 0) {
-            return '0 rows returned';
-        }
-        var cols = result.columns || [];
-        if (cols.length === 0) return JSON.stringify(result);
-        var md = '| ' + cols.join(' | ') + ' |\n| ' + cols.map(function() { return '---'; }).join(' | ') + ' |\n';
-        for (var i = 0; i < result.rows.length; i++) {
-            var cells = cols.map(function(c) {
-                var v = result.rows[i][c];
-                return v === null ? 'NULL' : String(v);
-            });
-            md += '| ' + cells.join(' | ') + ' |\n';
-        }
-        return md;
+    var saveAssistantResponse = function(conversationid, content) {
+        ajax.call([{
+            methodname: 'local_hermesagent_save_assistant_response',
+            args: { conversationid: conversationid, content: content }
+        }])[0].catch(function(ex) {
+            console.error('[Hermes] Failed to save assistant response:', ex);
+        });
     };
 
-    /**
-     * Add permission request to chat as inline approve/reject buttons
-     */
+    // ---------------------------------------------------------------------------
+    // Tool approval (inline, non-blocking)
+    // ---------------------------------------------------------------------------
+
     var addPermissionToChat = function(permData) {
         var permId = permData.permission_id;
         var title = permData.title || 'Tool execution requested';
         var desc = permData.description || '';
-        var kind = permData.kind || 'execute';
-        var msgId = 'hermes-perm-' + (msgCounter++);
 
-        var html = '<div class="hermes-message hermes-assistant-message hermes-perm-request" id="' + msgId + '">';
-        html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
-        html += '<div class="hermes-bubble hermes-assistant-bubble hermes-perm-bubble">';
-        html += '<div class="hermes-perm-header">';
-        html += '<span class="hermes-perm-icon">&#9881;</span>';
-        html += '<strong>' + escapeHtml(title) + '</strong>';
-        html += '</div>';
+        var html = '<div class="hermes-message hermes-assistant-message hermes-perm-request">' +
+            '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
+            '<div class="hermes-bubble hermes-assistant-bubble hermes-perm-bubble">' +
+            '<div class="hermes-perm-header">' +
+            '<span class="hermes-perm-icon">&#9881;</span> ' +
+            '<strong>' + escapeHtml(title) + '</strong>' +
+            '</div>';
         if (desc) {
             html += '<pre class="hermes-perm-desc">' + escapeHtml(desc) + '</pre>';
         }
-        html += '<div class="hermes-perm-prompt">Approve this action?</div>';
-        html += '<div class="hermes-perm-actions" data-perm-id="' + permId + '">';
-        html += '<button class="btn btn-success btn-sm hermes-perm-approve">Approve</button> ';
-        html += '<button class="btn btn-danger btn-sm hermes-perm-reject">Reject</button>';
-        html += '</div>';
-        html += '</div></div>';
+        html += '<div class="hermes-perm-prompt">Approve this action?</div>' +
+            '<div class="hermes-perm-actions" data-perm-id="' + permId + '">' +
+            '<button class="btn btn-success btn-sm hermes-perm-approve">Approve</button> ' +
+            '<button class="btn btn-danger btn-sm hermes-perm-reject">Reject</button>' +
+            '</div></div></div>';
 
         $('#hermes-chat-area').append(html);
         scrollToEnd();
-
-        // Store mapping from DOM element to permission_id
-        $('#' + msgId).data('perm-id', permId);
     };
 
-    /**
-     * Handle permission response (approve/reject) — inline, non-blocking
-     */
     var handlePermissionResponse = function(permId, approved, $btnContainer) {
         if (permId === null || permId === undefined) return;
 
-        // Disable buttons immediately to prevent double-click
         $btnContainer.find('button').prop('disabled', true);
 
         $.ajax({
@@ -540,151 +332,202 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 sesskey: config.sesskey,
                 permission_id: permId,
                 approved: approved ? 1 : 0
-            },
-            success: function() {
-                $btnContainer.html('<span class="text-' + (approved ? 'success' : 'danger') + '">' +
-                    (approved ? '✓ Approved' : '✗ Rejected') + '</span>');
-                scrollToEnd();
-            },
-            error: function(ex) {
-                console.error('[Hermes] handlePermissionResponse failed:', ex);
-                $btnContainer.find('button').prop('disabled', false);
             }
+        }).done(function() {
+            $btnContainer.html('<span class="text-' + (approved ? 'success' : 'danger') + '">' +
+                (approved ? '✓ Approved' : '✗ Rejected') + '</span>');
+            scrollToEnd();
+        }).fail(function(ex) {
+            console.error('[Hermes] permission response failed:', ex);
+            $btnContainer.find('button').prop('disabled', false);
         });
     };
 
-    /**
-     * Show permission modal (deprecated — replaced by inline addPermissionToChat)
-     */
-    var showPermissionModal = function(permData) {
-        addPermissionToChat(permData);
+    // ---------------------------------------------------------------------------
+    // Tool call display
+    // ---------------------------------------------------------------------------
+
+    var addToolCallToChat = function(tc) {
+        var msgId = 'hermes-tool-call-' + msgCounter;
+        var hasResult = tc.result && typeof tc.result === 'object' &&
+            !tc.result.error && Object.keys(tc.result).length > 0;
+        var resultText = hasResult
+            ? (tc.result.rows ? buildTableMarkdown(tc.result) : JSON.stringify(tc.result, null, 2))
+            : '';
+
+        var html = '<div class="hermes-message hermes-assistant-message hermes-tool-call" id="' + msgId + '">' +
+            '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
+            '<div class="hermes-bubble hermes-assistant-bubble hermes-tool-bubble">' +
+            '<details class="hermes-tool-details">' +
+            '<summary class="hermes-tool-summary">' +
+            '<span class="hermes-tool-icon">&#9881;</span> ' + escapeHtml(tc.name) +
+            ' <span class="hermes-tool-status">' +
+            (tc.status === 'completed'
+                ? '<span class="text-success">completed</span>'
+                : '<span class="text-warning">executing</span>') +
+            '</span></summary>' +
+            '<div class="hermes-tool-input"><strong>Input:</strong> ' +
+            '<code>' + escapeHtml(JSON.stringify(tc.input, null, 2)) + '</code></div>';
+
+        if (hasResult) {
+            html += '<div class="hermes-tool-result"><strong>Result:</strong> ' +
+                '<pre>' + escapeHtml(resultText) + '</pre></div>';
+        } else if (tc.result && tc.result.error) {
+            html += '<div class="hermes-tool-result" style="color: red;">' +
+                '<strong>Error:</strong> ' + escapeHtml(tc.result.error) + '</div>';
+        }
+
+        html += '</details></div></div>';
+        $('#hermes-chat-area').append(html);
+        scrollToEnd();
     };
 
-    /**
-     * Show tool confirmation modal (deprecated - kept for compatibility)
-     */
-    var showToolModal = function(toolCall) {
-        var html = '<h4>' + escapeHtml(toolCall.name) + '</h4>';
-        html += '<pre>' + escapeHtml(JSON.stringify(toolCall.input, null, 2)) + '</pre>';
-        html += '<p>Do you want to approve this action?</p>';
-
-        $('#hermes-tool-modal-body').html(html);
-        $('#hermes-tool-modal').show();
-        currentMessage = toolCall || {id: tc.id, name: tc.name, input: tc.input, result: tc.result};
+    var buildTableMarkdown = function(result) {
+        if (!result.rows || result.rows.length === 0) return '0 rows returned';
+        var cols = result.columns || [];
+        if (cols.length === 0) return JSON.stringify(result);
+        var md = '| ' + cols.join(' | ') + ' |\n| ' + cols.map(function() { return '---'; }).join(' | ') + ' |\n';
+        result.rows.forEach(function(row) {
+            md += '| ' + cols.map(function(c) {
+                var v = row[c];
+                return v === null ? 'NULL' : String(v);
+            }).join(' | ') + ' |\n';
+        });
+        return md;
     };
 
-    /**
-     * Handle tool response (approve/reject)
-     */
-    var handleToolResponse = function(approved) {
-        if (!currentMessage) return;
+    // ---------------------------------------------------------------------------
+    // Message rendering
+    // ---------------------------------------------------------------------------
 
-        // Call api.php directly - avoids Moodle external API cache issues
-        $.ajax({
-            url: config.api_url + '?action=tool_response',
-            type: 'POST',
-            data: {
-                sesskey: config.sesskey,
-                messageid: currentMessage.id,
-                approved: approved ? 1 : 0
-            },
-            success: function() {
-                $('#hermes-tool-modal').hide();
-                currentMessage = null;
-                scrollToEnd();
-            },
-            error: function(ex) {
-                console.error('[Hermes] handleToolResponse failed:', ex);
-            }
+    var loadHistory = function() {
+        ajax.call([{
+            methodname: 'local_hermesagent_get_history',
+            args: { conversationid: config.conversationid }
+        }])[0].then(function(data) {
+            renderMessages(data.messages || []);
+            scrollToEnd();
+        }).catch(function(ex) {
+            console.error('[Hermes] loadHistory failed:', ex);
+            $('#hermes-chat-area').append('<div class="hermes-error">Failed to load history.</div>');
         });
     };
 
-    /**
-     * Render messages to UI
-     */
+    var addUserMessage = function(content) {
+        $('#hermes-chat-area').append(
+            '<div class="hermes-message hermes-user-message">' +
+            '<div class="hermes-avatar hermes-user-avatar">U</div>' +
+            '<div class="hermes-bubble hermes-user-bubble">' +
+            '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+            '</div></div>'
+        );
+        scrollToEnd();
+    };
+
+    var addAssistantMessage = function() {
+        msgCounter++;
+        var contentId = 'hermes-assistant-content-' + msgCounter;
+        var spinnerId = 'hermes-spinner-' + msgCounter;
+
+        $('#hermes-chat-area').append(
+            '<div class="hermes-message hermes-assistant-message" id="hermes-assistant-msg-' + msgCounter + '">' +
+            '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
+            '<div class="hermes-bubble hermes-assistant-bubble">' +
+            '<div class="hermes-content hermes-streaming" id="' + contentId + '"></div>' +
+            '<div class="hermes-spinner" id="' + spinnerId + '"></div>' +
+            '</div></div>'
+        );
+        scrollToEnd();
+        return $('#' + contentId);
+    };
+
+    var addSystemMessage = function(text) {
+        var $el = $(
+            '<div class="hermes-system-message">' +
+            '<div class="hermes-system-icon">⚙</div>' +
+            '<div class="hermes-system-content">' + escapeHtml(text) + '</div>' +
+            '</div>'
+        );
+        $('#hermes-chat-area').append($el);
+        scrollToEnd();
+        return $el;
+    };
+
     var renderMessages = function(messages) {
         var chatArea = $('#hermes-chat-area');
         chatArea.empty();
-
         var promises = [];
+
         messages.forEach(function(msg) {
-            if (!msg || !msg.content || !msg.content.trim()) {
-                return; // Skip empty messages
-            }
+            if (!msg || !msg.content || !msg.content.trim()) return;
+            var content = msg.content.trim();
+
             if (msg.role === 'user') {
-                var html = '<div class="hermes-message hermes-user-message">';
-                html += '<div class="hermes-avatar hermes-user-avatar">U</div>';
-                html += '<div class="hermes-bubble hermes-user-bubble">';
-                html += '<div class="hermes-content">' + escapeHtml(msg.content.trim()) + '</div>';
-                html += '</div></div>';
-                chatArea.append(html);
+                chatArea.append(
+                    '<div class="hermes-message hermes-user-message">' +
+                    '<div class="hermes-avatar hermes-user-avatar">U</div>' +
+                    '<div class="hermes-bubble hermes-user-bubble">' +
+                    '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+                    '</div></div>'
+                );
             } else if (msg.role === 'assistant') {
-                var html = '<div class="hermes-message hermes-assistant-message">';
-                html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
-                html += '<div class="hermes-bubble hermes-assistant-bubble">';
-                html += '<div class="hermes-content"></div>';
-                html += '</div></div>';
-                chatArea.append(html);
-                
-                // Render markdown + math asynchronously
+                chatArea.append(
+                    '<div class="hermes-message hermes-assistant-message">' +
+                    '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
+                    '<div class="hermes-bubble hermes-assistant-bubble">' +
+                    '<div class="hermes-content"></div>' +
+                    '</div></div>'
+                );
                 var $content = chatArea.find('.hermes-content').last();
-                var promise = renderMarkdown(msg.content.trim()).then(function(mdHtml) {
-                    $content.html(mdHtml);
-                    typesetMath($content[0]);
-                });
-                promises.push(promise);
+                promises.push(
+                    renderMarkdown(content).then(function(mdHtml) {
+                        $content.html(mdHtml);
+                        typesetMath($content[0]);
+                    })
+                );
             }
         });
-        
-        // Return promise that resolves when all messages are rendered
+
         return Promise.all(promises);
     };
 
+    // ---------------------------------------------------------------------------
+    // Markdown & Math rendering
+    // ---------------------------------------------------------------------------
+
     /**
-     * Marked.js - loaded from CDN on first use.
-     * Moodle sets define.amd=true globally, so marked UMD tries to register
-     * as an AMD module instead of setting window.marked. We must temporarily
-     * hide define.amd while loading the script.
+     * Load marked.js from CDN via hidden iframe (avoids RequireJS/UMD conflict).
      */
-    var markedInstance = null;
-    var markedPromise = null;
-    
     var loadMarked = function() {
         if (markedInstance) return Promise.resolve(markedInstance);
         if (markedPromise) return markedPromise;
-        
+
         markedPromise = new Promise(function(resolve, reject) {
-            // Use an iframe to load marked without interfering with RequireJS
             var iframe = document.createElement('iframe');
             iframe.style.display = 'none';
             iframe.src = 'about:blank';
             document.head.appendChild(iframe);
-            
+
             var win = iframe.contentWindow || iframe.contentDocument.defaultView;
             var doc = win.document || iframe.contentDocument;
-            
-            // Stub define() in iframe so marked thinks AMD exists but doesn't register
-            var stubScript = doc.createElement('script');
-            stubScript.text = 'var define = function() { return null; };';
-            doc.head.appendChild(stubScript);
-            
+
+            // Stub define() so marked UMD doesn't register as AMD
+            var stub = doc.createElement('script');
+            stub.text = 'var define = function() { return null; };';
+            doc.head.appendChild(stub);
+
             var script = doc.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js';
             script.onload = function() {
                 if (win.marked) {
                     window.marked = win.marked;
                     markedInstance = win.marked;
-                    markedInstance.setOptions({
-                        gfm: true,
-                        breaks: false,
-                        headerIds: false,
-                        mangle: false
-                    });
+                    markedInstance.setOptions({ gfm: true, breaks: false, headerIds: false, mangle: false });
                     document.head.removeChild(iframe);
                     resolve(markedInstance);
                 } else {
                     document.head.removeChild(iframe);
-                    reject(new Error('marked loaded in iframe but window.marked is undefined'));
+                    reject(new Error('marked loaded but window.marked is undefined'));
                 }
             };
             script.onerror = function() {
@@ -693,15 +536,10 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             };
             doc.head.appendChild(script);
         });
-        
+
         return markedPromise;
     };
 
-    /**
-     * Configure MathJax for streaming content.
-     * Called once to set up MathJax config for dynamic typesetting.
-     */
-    var mathjaxConfigured = false;
     var configureMathJax = function() {
         if (mathjaxConfigured) return;
         mathjaxConfigured = true;
@@ -713,262 +551,170 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     messageStyle: 'none'
                 });
             }
-        } catch(e) {
-            console.warn('[Hermes] configureMathJax error:', e);
+        } catch (e) {
+            console.warn('[Hermes] MathJax config error:', e);
         }
     };
 
-    /**
-     * Typeset math in an element using Moodle's MathJax loader.
-     * Waits for MathJax startup before calling typesetPromise.
-     * @param {HTMLElement} element - DOM element containing math to typeset
-     */
     var typesetMath = function(element) {
         configureMathJax();
-
-        var loadPromise = mathjaxLoader.loadMathJax();
-
-        loadPromise.then(function() {
+        mathjaxLoader.loadMathJax().then(function() {
             if (!window.MathJax) {
                 console.error('[Hermes] MathJax not available after loadMathJax');
                 return;
             }
-
-            // Wait for startup.promise to resolve before calling typesetPromise
-            // On page revisit, MathJax may still be initializing
             if (window.MathJax.startup && window.MathJax.startup.promise) {
                 return window.MathJax.startup.promise.then(function() {
                     if (window.MathJax.typesetPromise) {
                         return window.MathJax.typesetPromise([element]);
-                    } else {
-                        console.error('[Hermes] typesetPromise not available after startup');
                     }
                 });
             } else if (window.MathJax.typesetPromise) {
-                // Startup already complete (edge case)
                 return window.MathJax.typesetPromise([element]);
-            } else {
-                console.error('[Hermes] neither startup.promise nor typesetPromise available');
             }
         }).catch(function(e) {
-            console.error('[Hermes] loadMathJax error:', e);
+            console.error('[Hermes] MathJax error:', e);
         });
     };
-    
+
     /**
-     * Math rendering pipeline — converts LLM math markup to MathJax-compatible TeX.
-     *
-     * Pipeline stages:
-     * 1. Protect math delimiters: replace \[...\], [...], and $$...$$ with
-     *    unicode placeholders so marked.js doesn't mangle them.
-     * 2. Render markdown with marked.js (GFM mode).
-     * 3. Unescape placeholders back to \[...\] for MathJax.
-     * 4. Call MathJax.typesetPromise() to render the math in the DOM.
-     *
-     * String.fromCharCode(92) is used for backslash to avoid RequireJS escaping.
+     * Render markdown to HTML, protecting math delimiters from marked.js.
+     * Pipeline: protect \[...\] and $$...$$ → render markdown → restore delimiters.
      */
-    var BS = String.fromCharCode(92);
-    var MATH_OPEN_PLACEHOLDER = String.fromCharCode(57344);
-    var MATH_CLOSE_PLACEHOLDER = String.fromCharCode(57345);
+    var renderMarkdown = function(text) {
+        if (!text || !text.trim()) return Promise.resolve('');
+        text = text.trim().replace(/\r\n/g, '\n');
+        // Strip dangerous tags
+        text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
+        text = protectMathDelimiters(text);
+        return loadMarked().then(function(m) {
+            return unescapeMathDelimiters(m.parse(text));
+        }).catch(function(err) {
+            console.error('[Hermes] markdown parse failed:', err);
+            return escapeHtml(text);
+        });
+    };
+
+    var setMarkdownContent = function(element, text) {
+        renderMarkdown(text).then(function(html) {
+            element.html(html);
+            try { typesetMath(element[0]); } catch (e) { /* non-fatal */ }
+        }).catch(function(e) { /* non-fatal */ });
+    };
+
+    // --- Math delimiter protection ---
+
+    var isMathContent = function(eq) {
+        if (!eq) return false;
+        return /[=+\-^{}]/.test(eq) || eq.indexOf(BS) !== -1 ||
+            /\b(sin|cos|tan|log|frac|sqrt|pi|infty|cdot|times|leq|geq|neq|approx|pm|right|left|lim|sum|int)\b/.test(eq);
+    };
 
     var protectMathDelimiters = function(text) {
         var result = '';
-        var searchStart = 0;
+        var start = 0;
         var OPEN = BS + '[';
         var CLOSE = BS + ']';
-        while (searchStart < text.length) {
-            var openIdx = text.indexOf(OPEN, searchStart);
-            if (openIdx === -1) {
-                result += text.substring(searchStart);
-                break;
-            }
-            var closeIdx = text.indexOf(CLOSE, openIdx + OPEN.length);
-            if (closeIdx === -1) {
-                result += text.substring(searchStart, openIdx) + MATH_OPEN_PLACEHOLDER;
-                searchStart = openIdx + OPEN.length;
+
+        while (start < text.length) {
+            var oi = text.indexOf(OPEN, start);
+            if (oi === -1) { result += text.substring(start); break; }
+            var ci = text.indexOf(CLOSE, oi + OPEN.length);
+            if (ci === -1) {
+                result += text.substring(start, oi) + MATH_OPEN;
+                start = oi + OPEN.length;
                 continue;
             }
-            var content = text.substring(openIdx + OPEN.length, closeIdx);
-            var eq = content.trim();
-            if (isMathContent(eq)) {
-                result += text.substring(searchStart, openIdx) + MATH_OPEN_PLACEHOLDER + content + MATH_CLOSE_PLACEHOLDER;
+            var content = text.substring(oi + OPEN.length, ci);
+            if (isMathContent(content.trim())) {
+                result += text.substring(start, oi) + MATH_OPEN + content + MATH_CLOSE;
             } else {
-                result += text.substring(searchStart, openIdx + OPEN.length);
+                result += text.substring(start, oi + OPEN.length);
             }
-            searchStart = closeIdx + CLOSE.length;
+            start = ci + CLOSE.length;
         }
 
-        result = protectBareBrackets(result);
-        result = convertLegacyDollars(result);
-        return result;
+        return convertLegacyDollars(protectBareBrackets(result));
     };
 
     var protectBareBrackets = function(text) {
-        var lineBreak = text.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
-        var parts = text.split(lineBreak);
-        var result = [];
-        for (var i = 0; i < parts.length; i++) {
-            result.push(protectLineBareBrackets(parts[i]));
-        }
-        return result.join(lineBreak);
+        var nl = text.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
+        return text.split(nl).map(protectLineBareBrackets).join(nl);
     };
 
     var protectLineBareBrackets = function(line) {
         var oi = line.indexOf('[');
-        if (oi === -1) return line;
-        var before = line.substring(0, oi);
-        if (before.trim() !== '') return line;
+        if (oi === -1 || line.substring(0, oi).trim() !== '') return line;
         var ci = line.indexOf(']', oi + 1);
-        if (ci === -1) return line;
-        if (ci + 1 < line.length && line[ci + 1] === '(') return line;
+        if (ci === -1 || (ci + 1 < line.length && line[ci + 1] === '(')) return line;
         var eq = line.substring(oi + 1, ci).trim();
         if (isMathContent(eq)) {
-            return before + MATH_OPEN_PLACEHOLDER + eq + MATH_CLOSE_PLACEHOLDER + line.substring(ci + 1);
+            return line.substring(0, oi) + MATH_OPEN + eq + MATH_CLOSE + line.substring(ci + 1);
         }
         return line;
     };
 
     var convertLegacyDollars = function(text) {
         var result = '';
-        var searchStart = 0;
-        while (searchStart < text.length) {
-            var oi = text.indexOf('$$', searchStart);
-            if (oi === -1) { result += text.substring(searchStart); break; }
+        var start = 0;
+        while (start < text.length) {
+            var oi = text.indexOf('$$', start);
+            if (oi === -1) { result += text.substring(start); break; }
             var ci = text.indexOf('$$', oi + 2);
             if (ci === -1) { result += text.substring(oi); break; }
             var eq = text.substring(oi + 2, ci).trim();
             if (isMathContent(eq)) {
-                result += text.substring(searchStart, oi) + MATH_OPEN_PLACEHOLDER + eq + MATH_CLOSE_PLACEHOLDER;
+                result += text.substring(start, oi) + MATH_OPEN + eq + MATH_CLOSE;
             } else {
                 result += text.substring(oi, ci + 2);
             }
-            searchStart = ci + 2;
+            start = ci + 2;
         }
         return result;
     };
 
     var unescapeMathDelimiters = function(html) {
-        return html.split(MATH_OPEN_PLACEHOLDER).join(BS + '[')
-                   .split(MATH_CLOSE_PLACEHOLDER).join(BS + ']');
+        return html.split(MATH_OPEN).join(BS + '[').split(MATH_CLOSE).join(BS + ']');
     };
 
-    var isMathContent = function(eq) {
-        if (!eq) return false;
-        var B = String.fromCharCode(92);
-        return eq.indexOf('=') !== -1 || eq.indexOf('+') !== -1 ||
-               eq.indexOf('-') !== -1 || eq.indexOf('^') !== -1 ||
-               eq.indexOf('{') !== -1 || eq.indexOf('}') !== -1 ||
-               eq.indexOf(B) !== -1 || eq.indexOf('sin') !== -1 ||
-               eq.indexOf('cos') !== -1 || eq.indexOf('log') !== -1 ||
-               eq.indexOf('frac') !== -1 || eq.indexOf('sqrt') !== -1 ||
-               eq.indexOf('pi') !== -1 || eq.indexOf('infty') !== -1 ||
-               eq.indexOf('cdot') !== -1 || eq.indexOf('times') !== -1 ||
-               eq.indexOf('leq') !== -1 || eq.indexOf('geq') !== -1 ||
-               eq.indexOf('neq') !== -1 || eq.indexOf('approx') !== -1 ||
-               eq.indexOf('pm') !== -1 || eq.indexOf('right') !== -1 ||
-               eq.indexOf('left') !== -1 || eq.indexOf('lim') !== -1 ||
-               eq.indexOf('sum') !== -1 || eq.indexOf('int') !== -1;
-    };
+    // ---------------------------------------------------------------------------
+    // Utilities
+    // ---------------------------------------------------------------------------
 
-    /**
-     * Render markdown to HTML (protects math delimiters during rendering).
-     * @param {string} text - Markdown text possibly containing math
-     * @returns {Promise<string>} HTML string with math delimiters intact
-     */
-    var renderMarkdown = function(text) {
-        if (!text) return Promise.resolve('');
-        text = text.trim();
-        if (!text) return Promise.resolve('');
-        text = text.replace(/\r\n/g, '\n');
-        text = text.replace(/<\s*(script|iframe|object|embed|form|link|meta|base)[^>]*>/gi, '');
-        text = text.replace(/<\s*\/?(script|iframe|object|embed|form|link|meta|base)[^>]*\s*>/gi, '');
-        text = protectMathDelimiters(text);
-        return loadMarked().then(function(m) {
-            var html = m.parse(text);
-            html = unescapeMathDelimiters(html);
-            return html;
-        }).catch(function(err) {
-            console.error('[Hermes] Failed to parse markdown:', err);
-            return Promise.resolve(escapeHtml(text));
-        });
-    };
-
-    /**
-     * Set content of an element with markdown + math rendering
-     */
-    var setMarkdownContent = function(element, text) {
-        renderMarkdown(text).then(function(html) {
-            element.html(html);
-            try {
-                typesetMath(element[0]);
-            } catch(e) {
-                console.warn('[Hermes] typesetMath failed (non-fatal):', e.message);
-            }
-        }).catch(function(e) {
-            console.warn('[Hermes] setMarkdownContent failed (non-fatal):', e.message);
-        });
-    };
-
-    /**
-     * Escape HTML
-     */
     var escapeHtml = function(text) {
         var div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     };
 
-    /**
-     * Scroll chat to bottom
-     */
-    var shouldAutoScroll = true;
-
     var scrollToEnd = function(force) {
         if (force || shouldAutoScroll) {
-            var chatArea = document.getElementById('hermes-chat-area');
-            chatArea.scrollTop = chatArea.scrollHeight;
+            var area = document.getElementById('hermes-chat-area');
+            area.scrollTop = area.scrollHeight;
         }
     };
 
-    /**
-     * Add a system message (for slash command feedback)
-     */
-    var addSystemMessage = function(text) {
-        var html = '<div class="hermes-system-message">';
-        html += '<div class="hermes-system-icon">⚙</div>';
-        html += '<div class="hermes-system-content">' + escapeHtml(text) + '</div>';
-        html += '</div>';
-        var $el = $(html);
-        $('#hermes-chat-area').append($el);
-        scrollToEnd();
-        return $el;
-    };
-
-    /**
-     * Check bridge status and display result
-     */
     var checkBridgeStatus = function() {
-        var $statusMsg = addSystemMessage('Checking bridge status...');
+        var $msg = addSystemMessage('Checking bridge status...');
         $.ajax({
             url: config.api_url + '?action=status&conversationid=' + config.conversationid,
             type: 'GET',
             timeout: 5000,
-            dataType: 'json',
-            success: function(res) {
-                var detail = 'Bridge: ' + (res.status || 'unknown');
-                if (res.port) {
-                    detail += ' (port ' + res.port + ')';
-                }
-                $statusMsg.find('.hermes-system-content').text(detail);
-            },
-            error: function() {
-                $statusMsg.find('.hermes-system-content').text('Bridge: unreachable (not responding)');
-            }
+            dataType: 'json'
+        }).done(function(res) {
+            var detail = 'Bridge: ' + (res.status || 'unknown');
+            if (res.port) detail += ' (port ' + res.port + ')';
+            $msg.find('.hermes-system-content').text(detail);
+        }).fail(function() {
+            $msg.find('.hermes-system-content').text('Bridge: unreachable');
         });
     };
 
+    // ---------------------------------------------------------------------------
+    // Public API
+    // ---------------------------------------------------------------------------
+
     return {
-        init: init,
-        setConfig: setConfig
+        init: init
     };
 });
