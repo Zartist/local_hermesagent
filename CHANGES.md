@@ -5,7 +5,7 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [0.3.11] — 2026-07-08
+## [0.3.10] — 2026-07-08
 
 ### Added
 
@@ -21,6 +21,8 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 - **Gateway status panel** with Start/Stop/Restart buttons and last log
   line display. Detects any platform config by checking for known env var
   prefixes in the `.env` file.
+
+#### File-based config editors
 - **`classes/admin/setting_configfile.php`** — custom `admin_setting` class
   that reads/writes a file directly (not the Moodle DB). The file is the
   single source of truth — no stale DB copy. Edits via Moodle, the
@@ -29,6 +31,8 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 - **Hermes config.yaml direct editor** on the settings page — edit the
   full Hermes configuration (model, provider, agent settings, toolsets,
   etc.) directly. Changes are written to `$HERMES_HOME/config.yaml` on save.
+
+#### Other
 - **Configurable dashboard port** — new `dashboard_port` setting (default
   9119), read by `dashboard.php` when starting the dashboard.
 - **`local_hermesagent_is_gateway_running()`** /
@@ -61,23 +65,6 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 - **Stale `bridge_port = 0`** — empty field was cast to `0` by `PARAM_INT`
   and stored in DB, shown instead of the default `9118`. Fixed by using
   static defaults and clearing the DB value.
-
----
-
-## [0.3.10] — 2026-07-07
-
-### Added
-
-#### Messaging Gateway (initial Matrix-only)
-- Initial Matrix-specific gateway support with 5 config fields (homeserver,
-  user ID, access token, allowed rooms, device ID).
-
-### Changed
-
-- Replaced Matrix-specific fields with generic `.env` textarea supporting
-  all 15+ Hermes gateway platforms.
-- Gateway `.env` changed from DB-stored textarea to direct file editor
-  (`setting_configfile`), keeping it in sync with Dashboard edits.
 
 ---
 
