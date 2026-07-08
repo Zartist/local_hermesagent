@@ -362,7 +362,8 @@
   min-width: 0;
 }
 
-.hermes-conv-rename {
+.hermes-conv-rename,
+.hermes-conv-duplicate {
   display: none;
   padding: 0.1rem 0.3rem;
   font-size: 0.75rem;
@@ -373,12 +374,71 @@
   flex-shrink: 0;
   margin-left: 0.25rem;
 }
-.hermes-conv-rename:hover {
+.hermes-conv-rename:hover,
+.hermes-conv-duplicate:hover {
   color: #4f46e5;
 }
 
-.hermes-conv-item:hover .hermes-conv-rename {
+.hermes-conv-item:hover .hermes-conv-rename,
+.hermes-conv-item:hover .hermes-conv-duplicate {
   display: inline-block;
+}
+
+/* Bulk selection mode */
+.hermes-bulk-actions {
+  margin: 8px 0 4px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.hermes-bulk-actions .btn-sm {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+.hermes-bulk-cancel {
+  color: #a6adc8 !important;
+  text-decoration: none;
+}
+.hermes-conv-checkbox {
+  margin-right: 6px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.hermes-conv-item.hermes-bulk-mode {
+  padding-left: 6px;
+}
+.hermes-conv-item.hermes-bulk-mode .hermes-conv-rename,
+.hermes-conv-item.hermes-bulk-mode .hermes-conv-duplicate {
+  display: none !important;
+}
+
+/* Copy button */
+.hermes-copy-btn {
+  display: inline-block;
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  margin-top: 4px;
+}
+.hermes-bubble:hover .hermes-copy-btn {
+  opacity: 0.6;
+}
+.hermes-copy-btn:hover {
+  opacity: 1 !important;
+  background: #f1f5f9;
+}
+.hermes-user-bubble .hermes-copy-btn {
+  border-color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.7);
+}
+.hermes-user-bubble .hermes-copy-btn:hover {
+  background: rgba(255,255,255,0.15);
+  color: white;
 }
 
 /* Responsive — mobile phones (portrait and small screens) */

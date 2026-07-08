@@ -328,5 +328,112 @@ if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_sys
         ]);
     }
 
+    /**
+     * Bulk delete conversations.
+     */
+    public static function bulk_delete_conversations_parameters() {
+        return new external_function_parameters([
+            'conversationids' => new external_multiple_structure(
+                new external_value(PARAM_INT, 'Conversation ID')
+            ),
+        ]);
+    }
+
+    public static function bulk_delete_conversations($conversationids) {
+        global $DB, $USER;
+
+        $params = self::validate_parameters(self::bulk_delete_conversations_parameters(), [
+            'conversationids' => $conversationids,
+        ]);
+
+        if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_system::instance())) {
+            throw new \moodle_exception('nopermissions', '', '', '');
+        }
+
+        $deleted = 0;
+        foreach ($params['conversationids'] as $cid) {
+            // Only delete conversations owned by this user
+            $conv = $DB->get_record('local_hermesagent_conversations', [
+                'id' => $cid,
+                'usermodified' => $USER->id,
+            ]);
+            if ($conv) {
+                $DB->delete_records('local_hermesagent_messages', ['conversationid' => $cid]);
+                $DB->delete_records('local_hermesagent_conversations', ['id' => $cid]);
+                $deleted++;
+            }
+        }
+
+        return ['deleted' => $deleted];
+    }
+
+    public static function bulk_delete_conversations_returns() {
+        return new external_single_structure([
+            'deleted' => new external_value(PARAM_INT, 'Number of conversations deleted'),
+        ]);
+    }
+
+    /**
+     * Duplicate a conversation (copy + all messages).
+     */
+    public static function duplicate_conversation_parameters() {
+        return new external_function_parameters([
+            'conversationid' => new external_value(PARAM_INT, 'Conversation ID to duplicate'),
+        ]);
+    }
+
+    public static function duplicate_conversation($conversationid) {
+        global $DB, $USER;
+
+        $params = self::validate_parameters(self::duplicate_conversation_parameters(), [
+            'conversationid' => $conversationid,
+        ]);
+
+        if (!is_siteadmin($USER) && !has_capability('local/hermesagent:use', context_system::instance())) {
+            throw new \moodle_exception('nopermissions', '', '', '');
+        }
+
+        // Verify ownership
+        $conv = $DB->get_record('local_hermesagent_conversations', [
+            'id' => $params['conversationid'],
+            'usermodified' => $USER->id,
+        ], '*');
+        if (!$conv) {
+            throw new \moodle_exception('invalidconversation');
+        }
+
+        // Create new conversation
+        $newconv = new \stdClass();
+        $newconv->name = $conv->name . ' (copy)';
+        $newconv->usermodified = $USER->id;
+        $newconv->acp_session_id = null; // New session will be created on first prompt
+        $newconv->timecreated = time();
+        $newconv->timemodified = time();
+        $newid = $DB->insert_record('local_hermesagent_conversations', $newconv);
+
+        // Copy all messages
+        $messages = $DB->get_records('local_hermesagent_messages', [
+            'conversationid' => $params['conversationid'],
+        ], 'id ASC');
+        foreach ($messages as $msg) {
+            $newmsg = new \stdClass();
+            $newmsg->conversationid = $newid;
+            $newmsg->role = $msg->role;
+            $newmsg->content = $msg->content;
+            $newmsg->tool_calls = $msg->tool_calls;
+            $newmsg->tool_results = $msg->tool_results;
+            $newmsg->timemodified = time();
+            $DB->insert_record('local_hermesagent_messages', $newmsg);
+        }
+
+        return ['conversationid' => $newid];
+    }
+
+    public static function duplicate_conversation_returns() {
+        return new external_single_structure([
+            'conversationid' => new external_value(PARAM_INT, 'New conversation ID'),
+        ]);
+    }
+
 
 }

@@ -90,6 +90,26 @@ echo html_writer::start_div('hermes-chat-container');
 echo html_writer::start_div('hermes-sidebar');
 echo html_writer::start_div('hermes-sidebar-header');
 echo html_writer::tag('h3', get_string('conversations', 'local_hermesagent'));
+
+// Bulk action toolbar (hidden until a checkbox is checked)
+echo html_writer::start_div('hermes-bulk-actions', ['style' => 'display:none;']);
+echo html_writer::tag('button', '🗑 Delete', [
+    'id' => 'hermes-bulk-delete',
+    'class' => 'btn btn-danger btn-sm',
+    'title' => 'Delete selected',
+]);
+echo html_writer::tag('button', '⧉ Duplicate', [
+    'id' => 'hermes-bulk-duplicate',
+    'class' => 'btn btn-secondary btn-sm',
+    'title' => 'Duplicate selected',
+]);
+echo html_writer::tag('button', '✕', [
+    'id' => 'hermes-bulk-cancel',
+    'class' => 'btn btn-link btn-sm hermes-bulk-cancel',
+    'title' => 'Cancel selection',
+]);
+echo html_writer::end_div();
+
 echo html_writer::empty_tag('hr');
 echo html_writer::end_div('hermes-sidebar-header');
 
@@ -101,6 +121,12 @@ foreach ($conversations as $conv) {
         'class' => 'hermes-conv-item' . $cls,
         'title' => userdate($conv->timemodified),
     ]);
+    echo html_writer::empty_tag('input', [
+        'type' => 'checkbox',
+        'class' => 'hermes-conv-checkbox',
+        'data-conv-id' => $conv->id,
+        'style' => 'display:none;',
+    ]);
     echo html_writer::tag('span', format_text($conv->name, FORMAT_PLAIN), [
         'class' => 'hermes-conv-name',
         'data-conv-id' => $conv->id,
@@ -110,6 +136,11 @@ foreach ($conversations as $conv) {
         'data-conv-id' => $conv->id,
         'data-conv-name' => s($conv->name),
         'title' => get_string('rename', 'local_hermesagent'),
+    ]);
+    echo html_writer::tag('button', '⧉', [
+        'class' => 'hermes-conv-duplicate',
+        'data-conv-id' => $conv->id,
+        'title' => 'Duplicate',
     ]);
     echo html_writer::end_div();
 }
@@ -149,27 +180,6 @@ echo html_writer::tag('button', get_string('send', 'local_hermesagent'), [
 ]);
 echo html_writer::end_div('hermes-input-container');
 echo html_writer::end_div('hermes-input-area');
-
-// Tool confirmation modal
-echo html_writer::start_div('hermes-tool-modal', [
-    'id' => 'hermes-tool-modal',
-    'style' => 'display:none;',
-    'class' => 'hermes-tool-modal',
-]);
-echo html_writer::start_div('hermes-tool-modal-content');
-echo html_writer::tag('div', '', ['id' => 'hermes-tool-modal-body']);
-echo html_writer::start_div('hermes-tool-modal-actions');
-echo html_writer::tag('button', get_string('approve', 'local_hermesagent'), [
-    'id' => 'hermes-tool-approve',
-    'class' => 'btn btn-success',
-]);
-echo html_writer::tag('button', get_string('reject', 'local_hermesagent'), [
-    'id' => 'hermes-tool-reject',
-    'class' => 'btn btn-danger',
-]);
-echo html_writer::end_div('hermes-tool-modal-actions');
-echo html_writer::end_div('hermes-tool-modal-content');
-echo html_writer::end_div('hermes-tool-modal');
 
 echo html_writer::end_div('hermes-main');
 echo html_writer::end_div('hermes-chat-container');

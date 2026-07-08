@@ -64,13 +64,16 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         });
 
         // Sidebar toggle for mobile
-        $('.hermes-sidebar-header').on('click', function() {
+        $('.hermes-sidebar-header').on('click', function(e) {
+            // Don't toggle when clicking bulk action buttons
+            if ($(e.target).closest('.hermes-bulk-actions').length) return;
             $('.hermes-sidebar').toggleClass('hermes-sidebar-open');
         });
 
         // Conversation list clicks (delegated)
         $(document).on('click', '.hermes-conv-item', function(e) {
-            if ($(e.target).closest('.hermes-conv-rename').length) return;
+            // Don't navigate when clicking action buttons or checkboxes
+            if ($(e.target).closest('.hermes-conv-rename, .hermes-conv-duplicate, .hermes-conv-checkbox').length) return;
             var convId = $(this).data('conv-id');
             window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?conversationid=' + convId;
         });
@@ -110,6 +113,162 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     console.error('[Hermes] rename failed:', ex);
                 });
             }
+        });
+
+        // Duplicate single conversation
+        $(document).on('click', '.hermes-conv-duplicate', function(e) {
+            e.stopPropagation();
+            var convId = $(this).data('conv-id');
+            $(this).prop('disabled', true);
+            ajax.call([{
+                methodname: 'local_hermesagent_duplicate_conversation',
+                args: { conversationid: convId }
+            }])[0].then(function(res) {
+                window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?conversationid=' + res.conversationid;
+            }).catch(function(ex) {
+                console.error('[Hermes] duplicate failed:', ex);
+                alert('Duplicate failed: ' + (ex.message || ex));
+            });
+        });
+
+        // --- Bulk selection mode ---
+        var bulkMode = false;
+
+        // Long-press or right-click on a conv item enters bulk mode
+        var pressTimer;
+        $('.hermes-conversation-list').on('contextmenu', '.hermes-conv-item', function(e) {
+            e.preventDefault();
+            enterBulkMode();
+            $(this).find('.hermes-conv-checkbox').prop('checked', true);
+            updateBulkBar();
+        });
+
+        // Long-press for mobile
+        $('.hermes-conversation-list').on('touchstart', '.hermes-conv-item', function(e) {
+            var $item = $(this);
+            pressTimer = setTimeout(function() {
+                enterBulkMode();
+                $item.find('.hermes-conv-checkbox').prop('checked', true);
+                updateBulkBar();
+            }, 600);
+        });
+        $('.hermes-conversation-list').on('touchend touchmove', '.hermes-conv-item', function() {
+            clearTimeout(pressTimer);
+        });
+
+        function enterBulkMode() {
+            bulkMode = true;
+            $('.hermes-conv-checkbox').show();
+            $('.hermes-conv-item').addClass('hermes-bulk-mode');
+        }
+
+        function exitBulkMode() {
+            bulkMode = false;
+            $('.hermes-conv-checkbox').hide().prop('checked', false);
+            $('.hermes-conv-item').removeClass('hermes-bulk-mode');
+            $('.hermes-bulk-actions').hide();
+        }
+
+        // Checkbox toggle
+        $(document).on('click', '.hermes-conv-checkbox', function(e) {
+            e.stopPropagation();
+            updateBulkBar();
+        });
+
+        // In bulk mode, clicking an item toggles its checkbox
+        $(document).on('click', '.hermes-conv-item.hermes-bulk-mode', function(e) {
+            if ($(e.target).closest('.hermes-conv-rename, .hermes-conv-duplicate').length) return;
+            e.stopPropagation();
+            var $cb = $(this).find('.hermes-conv-checkbox');
+            $cb.prop('checked', !$cb.prop('checked'));
+            updateBulkBar();
+        });
+
+        function updateBulkBar() {
+            var checked = $('.hermes-conv-checkbox:checked');
+            if (checked.length > 0) {
+                $('.hermes-bulk-actions').show();
+                $('#hermes-bulk-delete, #hermes-bulk-duplicate').prop('disabled', false);
+            } else {
+                $('.hermes-bulk-actions').show(); // keep visible in bulk mode even with 0 checked
+                $('#hermes-bulk-delete, #hermes-bulk-duplicate').prop('disabled', true);
+            }
+        }
+
+        // Bulk delete
+        $('#hermes-bulk-delete').on('click', function() {
+            var ids = $('.hermes-conv-checkbox:checked').map(function() {
+                return parseInt($(this).data('conv-id'));
+            }).get();
+            if (!ids.length) return;
+            if (!confirm('Delete ' + ids.length + ' conversation(s)? This cannot be undone.')) return;
+            ajax.call([{
+                methodname: 'local_hermesagent_bulk_delete_conversations',
+                args: { conversationids: ids }
+            }])[0].then(function(res) {
+                // Remove deleted items from DOM; reload if current conv was deleted
+                var currentId = config.conversationid;
+                var reloadNeeded = ids.indexOf(currentId) !== -1;
+                ids.forEach(function(id) {
+                    $('.hermes-conv-item[data-conv-id="' + id + '"]').remove();
+                });
+                exitBulkMode();
+                if (reloadNeeded) {
+                    window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php';
+                }
+            }).catch(function(ex) {
+                console.error('[Hermes] bulk delete failed:', ex);
+                alert('Delete failed: ' + (ex.message || ex));
+            });
+        });
+
+        // Bulk duplicate (duplicates each selected conversation)
+        $('#hermes-bulk-duplicate').on('click', function() {
+            var ids = $('.hermes-conv-checkbox:checked').map(function() {
+                return parseInt($(this).data('conv-id'));
+            }).get();
+            if (!ids.length) return;
+            var done = 0;
+            ids.forEach(function(id) {
+                ajax.call([{
+                    methodname: 'local_hermesagent_duplicate_conversation',
+                    args: { conversationid: id }
+                }])[0].then(function() {
+                    done++;
+                    if (done === ids.length) {
+                        exitBulkMode();
+                        window.location.reload();
+                    }
+                }).catch(function(ex) {
+                    console.error('[Hermes] duplicate failed for conv ' + id + ':', ex);
+                    done++;
+                    if (done === ids.length) {
+                        exitBulkMode();
+                        window.location.reload();
+                    }
+                });
+            });
+        });
+
+        // Cancel bulk mode
+        $('#hermes-bulk-cancel').on('click', function(e) {
+            e.stopPropagation();
+            exitBulkMode();
+        });
+
+        // Per-message copy button (delegated)
+        $(document).on('click', '.hermes-copy-btn', function() {
+            var text = $(this).data('raw-text');
+            copyToClipboard(text, this);
+        });
+
+        // Double-click message content to select it
+        $(document).on('dblclick', '.hermes-content', function() {
+            var range = document.createRange();
+            range.selectNodeContents(this);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
         });
     };
 
@@ -253,6 +412,8 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                 es.close();
                 eventSourceRef = null;
                 finishStreaming(spinnerId);
+                // Add copy button inside the bubble, after the content div
+                messageEl.parent().append('<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(rawMarkdown) + '" title="Copy">📋</button>');
                 saveAssistantResponse(conversationid, rawMarkdown);
             });
 
@@ -419,6 +580,7 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             '<div class="hermes-avatar hermes-user-avatar">U</div>' +
             '<div class="hermes-bubble hermes-user-bubble">' +
             '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+            '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
             '</div></div>'
         );
         scrollToEnd();
@@ -468,6 +630,7 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     '<div class="hermes-avatar hermes-user-avatar">U</div>' +
                     '<div class="hermes-bubble hermes-user-bubble">' +
                     '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+                    '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
                     '</div></div>'
                 );
             } else if (msg.role === 'assistant') {
@@ -476,6 +639,7 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
                     '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
                     '<div class="hermes-bubble hermes-assistant-bubble">' +
                     '<div class="hermes-content"></div>' +
+                    '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
                     '</div></div>'
                 );
                 var $content = chatArea.find('.hermes-content').last();
@@ -685,6 +849,41 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         var div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    };
+
+    /**
+     * Copy text to clipboard. Uses navigator.clipboard if available,
+     * falls back to a hidden textarea + execCommand.
+     */
+    var copyToClipboard = function(text, btn) {
+        var done = function() {
+            if (btn) {
+                var orig = btn.textContent;
+                btn.textContent = '✓';
+                setTimeout(function() { btn.textContent = orig; }, 1500);
+            }
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function() {
+                fallbackCopy(text);
+                done();
+            });
+        } else {
+            fallbackCopy(text);
+            done();
+        }
+    };
+
+    var fallbackCopy = function(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+        document.body.removeChild(ta);
     };
 
     var scrollToEnd = function(force) {
