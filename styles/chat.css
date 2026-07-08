@@ -277,32 +277,49 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .hermes-perm-header h4 {
   margin: 0;
   font-size: 16px;
 }
 .hermes-perm-icon {
-  font-size: 20px;
+  font-size: 18px;
 }
 .hermes-perm-desc {
   background: #1e1e2e;
   color: #cdd6f4;
-  padding: 12px;
+  padding: 10px 12px;
   border-radius: 6px;
   overflow-x: auto;
   font-size: 13px;
-  margin: 8px 0;
+  margin: 6px 0;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 300px;
+  max-height: 250px;
   overflow-y: auto;
 }
 .hermes-perm-prompt {
-  margin-top: 12px;
+  margin-top: 8px;
   font-weight: 500;
   color: #475569;
+  font-size: 13px;
+}
+
+/* Inline permission request in chat */
+.hermes-perm-request .hermes-perm-bubble {
+  background: #fefce8;
+  border-left: 3px solid #f59e0b;
+}
+.hermes-perm-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.hermes-perm-actions .btn-sm {
+  font-size: 13px;
+  padding: 4px 14px;
 }
 
 /* Spinner */

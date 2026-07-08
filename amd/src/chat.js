@@ -81,12 +81,16 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             window.location.href = M.cfg.wwwroot + '/local/hermesagent/chat.php?action=new';
         });
 
-        // Tool modal actions
-        $('#hermes-tool-approve').on('click', function() {
-            handlePermissionResponse(true);
+        // Tool permission actions — delegated for inline buttons
+        $(document).on('click', '.hermes-perm-approve', function() {
+            var $container = $(this).closest('.hermes-perm-actions');
+            var permId = $container.data('perm-id');
+            handlePermissionResponse(permId, true, $container);
         });
-        $('#hermes-tool-reject').on('click', function() {
-            handlePermissionResponse(false);
+        $(document).on('click', '.hermes-perm-reject', function() {
+            var $container = $(this).closest('.hermes-perm-actions');
+            var permId = $container.data('perm-id');
+            handlePermissionResponse(permId, false, $container);
         });
 
         // Rename conversation
@@ -336,11 +340,11 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
             addToolCallToChat(data.tool_call);
         });
 
-        // Handle permission request — show approval modal
+        // Handle permission request — show inline approve/reject in chat
         eventSource.addEventListener('permission', function(e) {
             console.log('[Hermes-SSE] permission event received');
             var data = JSON.parse(e.data);
-            showPermissionModal(data);
+            addPermissionToChat(data);
         });
 
         eventSource.addEventListener('error', function(e) {
@@ -487,55 +491,73 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     };
 
     /**
-     * Show permission modal for tool approval
+     * Add permission request to chat as inline approve/reject buttons
      */
-    var showPermissionModal = function(permData) {
+    var addPermissionToChat = function(permData) {
         var permId = permData.permission_id;
         var title = permData.title || 'Tool execution requested';
         var desc = permData.description || '';
         var kind = permData.kind || 'execute';
+        var msgId = 'hermes-perm-' + (msgCounter++);
 
-        var html = '<div class="hermes-perm-header">';
+        var html = '<div class="hermes-message hermes-assistant-message hermes-perm-request" id="' + msgId + '">';
+        html += '<div class="hermes-avatar hermes-assistant-avatar">H</div>';
+        html += '<div class="hermes-bubble hermes-assistant-bubble hermes-perm-bubble">';
+        html += '<div class="hermes-perm-header">';
         html += '<span class="hermes-perm-icon">&#9881;</span>';
-        html += '<h4>' + escapeHtml(title) + '</h4>';
+        html += '<strong>' + escapeHtml(title) + '</strong>';
         html += '</div>';
         if (desc) {
             html += '<pre class="hermes-perm-desc">' + escapeHtml(desc) + '</pre>';
         }
-        html += '<p class="hermes-perm-prompt">Do you want to approve this action?</p>';
+        html += '<div class="hermes-perm-prompt">Approve this action?</div>';
+        html += '<div class="hermes-perm-actions" data-perm-id="' + permId + '">';
+        html += '<button class="btn btn-success btn-sm hermes-perm-approve">Approve</button> ';
+        html += '<button class="btn btn-danger btn-sm hermes-perm-reject">Reject</button>';
+        html += '</div>';
+        html += '</div></div>';
 
-        $('#hermes-tool-modal-body').html(html);
-        $('#hermes-tool-modal').show();
+        $('#hermes-chat-area').append(html);
+        scrollToEnd();
 
-        // Store permission_id for the approve/reject handlers
-        currentPermissionId = permId;
+        // Store mapping from DOM element to permission_id
+        $('#' + msgId).data('perm-id', permId);
     };
 
     /**
-     * Handle permission response (approve/reject)
+     * Handle permission response (approve/reject) — inline, non-blocking
      */
-    var handlePermissionResponse = function(approved) {
-        if (currentPermissionId === null) return;
+    var handlePermissionResponse = function(permId, approved, $btnContainer) {
+        if (permId === null || permId === undefined) return;
+
+        // Disable buttons immediately to prevent double-click
+        $btnContainer.find('button').prop('disabled', true);
 
         $.ajax({
             url: config.api_url + '?action=permission_response',
             type: 'POST',
             data: {
                 sesskey: config.sesskey,
-                permission_id: currentPermissionId,
+                permission_id: permId,
                 approved: approved ? 1 : 0
             },
             success: function() {
-                $('#hermes-tool-modal').hide();
-                currentPermissionId = null;
+                $btnContainer.html('<span class="text-' + (approved ? 'success' : 'danger') + '">' +
+                    (approved ? '✓ Approved' : '✗ Rejected') + '</span>');
                 scrollToEnd();
             },
             error: function(ex) {
                 console.error('[Hermes] handlePermissionResponse failed:', ex);
-                $('#hermes-tool-modal').hide();
-                currentPermissionId = null;
+                $btnContainer.find('button').prop('disabled', false);
             }
         });
+    };
+
+    /**
+     * Show permission modal (deprecated — replaced by inline addPermissionToChat)
+     */
+    var showPermissionModal = function(permData) {
+        addPermissionToChat(permData);
     };
 
     /**

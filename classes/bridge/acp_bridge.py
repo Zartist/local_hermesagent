@@ -52,7 +52,7 @@ log = logging.getLogger("acp_bridge")
 # ---------------------------------------------------------------------------
 HERMES_BIN = Path(os.environ.get("HERMES_HOME", "/tmp")) / "venv" / "bin" / "hermes"
 HERMES_HOME_ENV = os.environ.get("HERMES_HOME", "/tmp")
-ACP_TIMEOUT_SECONDS = float(os.environ.get("ACP_TIMEOUT", "300"))
+ACP_TIMEOUT_SECONDS = float(os.environ.get("ACP_TIMEOUT", "600"))  # 10 min — allows time for tool approval
 PORT = int(os.environ.get("BRIDGE_PORT", "9118"))
 
 app = FastAPI(title="Hermes ACP Bridge")
@@ -235,10 +235,11 @@ class ACPProcess:
                 log.debug("agent_thought_chunk: %s", text[:200])
             return True
 
-        # session/request_permission - forward to browser for approval (via SSE)
+        # session/request_permission - let the streaming loop handle it
+        # (the streaming loop yields a permission event to the browser)
         if method == "session/request_permission" and msg_id is not None:
-            log.info("Permission request %s will be forwarded via SSE", msg_id)
-            return True  # Don't auto-approve; the streaming loop handles it
+            log.info("Permission request %s — forwarding to streaming loop", msg_id)
+            return False  # Don't consume; let the streaming loop handle it
 
         # fs/* and terminal/* requests from ACP - respond with error if not handled
         if msg_id is not None and method and ("/" in method):
@@ -355,22 +356,44 @@ class ACPProcess:
             if method == "session/request_permission" and msg_id is not None:
                 params = msg.get("params", {})
                 options = params.get("options", [])
-                # Extract tool call info from the params
-                call_info = params.get("call", {})
-                call_title = call_info.get("title", "Unknown tool")
-                call_kind = call_info.get("kind", "execute")
-                content = call_info.get("content", [])
+                # Extract tool call info — ACP uses "toolCall" not "call"
+                tc = params.get("toolCall", {})
+                raw = tc.get("rawInput", {})
+                tool_name = raw.get("tool", "unknown")
+                tool_args = raw.get("arguments", {})
+                call_kind = tc.get("kind", "execute")
+                content_items = tc.get("content", [])
 
-                # Build a readable description of what the tool wants to do
+                # Build title from rawInput
+                if tool_args.get("path"):
+                    call_title = f"{tool_name}: {tool_args['path']}"
+                elif tool_args.get("command"):
+                    cmd = tool_args["command"]
+                    call_title = f"{tool_name}: {cmd[:120]}"
+                else:
+                    call_title = tool_name
+
+                # Build a readable description
                 desc_parts = []
-                for item in content:
+                for item in content_items:
                     if isinstance(item, dict):
                         item_type = item.get("type", "")
-                        item_content = item.get("content", {})
-                        if isinstance(item_content, dict):
-                            desc_parts.append(item_content.get("text", ""))
-                        elif isinstance(item_content, str):
-                            desc_parts.append(item_content)
+                        if item_type == "diff":
+                            old = item.get("oldText", "")
+                            new = item.get("newText", "")
+                            if new:
+                                desc_parts.append(f"+ {new.strip()}")
+                            if old:
+                                desc_parts.append(f"- {old.strip()}")
+                        elif item_type == "content":
+                            ic = item.get("content", {})
+                            if isinstance(ic, dict):
+                                desc_parts.append(ic.get("text", ""))
+                        elif "text" in item:
+                            desc_parts.append(item["text"])
+                # If no description from content, use raw arguments
+                if not desc_parts and tool_args:
+                    desc_parts.append(json.dumps(tool_args, indent=2, default=str)[:2000])
 
                 log.info("Forwarding permission request %s to browser: %s", msg_id, call_title)
 
