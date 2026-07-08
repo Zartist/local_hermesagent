@@ -707,17 +707,20 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
     };
 
     var addUserMessage = function(content) {
+        msgCounter++;
+        var contentId = 'hermes-user-content-' + msgCounter;
         $('#hermes-chat-area').append(
             '<div class="hermes-message hermes-user-message">' +
             '<div class="hermes-avatar hermes-user-avatar">U</div>' +
             '<div class="hermes-bubble hermes-user-bubble">' +
-            '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+            '<div class="hermes-content" id="' + contentId + '"></div>' +
             '<div class="hermes-msg-actions">' +
             '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="user" title="Quote">↩</button>' +
             '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
             '</div>' +
             '</div></div>'
         );
+        setMarkdownContent($('#' + contentId), content);
         scrollToEnd();
     };
 
@@ -755,41 +758,54 @@ define(['jquery', 'core/ajax', 'core/str', 'filter_mathjaxloader/loader'], funct
         chatArea.empty();
         var promises = [];
 
-        messages.forEach(function(msg) {
+        messages.forEach(function(msg, i) {
             if (!msg || !msg.content || !msg.content.trim()) return;
             var content = msg.content.trim();
 
             if (msg.role === 'user') {
+                var userContentId = 'hermes-hist-user-' + i;
                 chatArea.append(
                     '<div class="hermes-message hermes-user-message">' +
                     '<div class="hermes-avatar hermes-user-avatar">U</div>' +
                     '<div class="hermes-bubble hermes-user-bubble">' +
-                    '<div class="hermes-content">' + escapeHtml(content) + '</div>' +
+                    '<div class="hermes-content" id="' + userContentId + '"></div>' +
                     '<div class="hermes-msg-actions">' +
                     '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="user" title="Quote">↩</button>' +
                     '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
                     '</div>' +
                     '</div></div>'
                 );
+                (function(cid, text) {
+                    var $el = $('#' + cid);
+                    promises.push(
+                        renderMarkdown(text).then(function(mdHtml) {
+                            $el.html(mdHtml);
+                            typesetMath($el[0]);
+                        })
+                    );
+                })(userContentId, content);
             } else if (msg.role === 'assistant') {
+                var assistantContentId = 'hermes-hist-asst-' + i;
                 chatArea.append(
                     '<div class="hermes-message hermes-assistant-message">' +
                     '<div class="hermes-avatar hermes-assistant-avatar">H</div>' +
                     '<div class="hermes-bubble hermes-assistant-bubble">' +
-                    '<div class="hermes-content"></div>' +
+                    '<div class="hermes-content" id="' + assistantContentId + '"></div>' +
                     '<div class="hermes-msg-actions">' +
                     '<button class="hermes-reply-btn" data-raw-text="' + escapeHtml(content) + '" data-role="assistant" title="Quote">↩</button>' +
                     '<button class="hermes-copy-btn" data-raw-text="' + escapeHtml(content) + '" title="Copy">📋</button>' +
                     '</div>' +
                     '</div></div>'
                 );
-                var $content = chatArea.find('.hermes-content').last();
-                promises.push(
-                    renderMarkdown(content).then(function(mdHtml) {
-                        $content.html(mdHtml);
-                        typesetMath($content[0]);
-                    })
-                );
+                (function(cid, text) {
+                    var $el = chatArea.find('#' + cid);
+                    promises.push(
+                        renderMarkdown(text).then(function(mdHtml) {
+                            $el.html(mdHtml);
+                            typesetMath($el[0]);
+                        })
+                    );
+                })(assistantContentId, content);
             }
         });
 
