@@ -570,20 +570,15 @@
 .hermes-sidebar-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 12px;
-}
-.hermes-sidebar-title-row h3 {
-  flex: 1;
-  margin: 0;
-  min-width: 0;
 }
 .hermes-new-conv-btn {
   background: none;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -603,8 +598,8 @@
   background: none;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   font-size: 12px;
   cursor: pointer;
   color: #64748b;
@@ -621,15 +616,17 @@
 /* Conversation search box */
 .hermes-search-container {
   position: relative;
-  padding: 4px 0;
+  flex: 1;
+  min-width: 0;
 }
 .hermes-search-input {
   width: 100%;
   font-size: 13px;
-  padding: 6px 28px 6px 10px;
+  padding: 6px 24px 6px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   background: #f8fafc;
+  height: 28px;
 }
 .hermes-search-input:focus {
   border-color: #4f46e5;
@@ -639,7 +636,7 @@
 }
 .hermes-search-clear {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
   background: none;

@@ -34,7 +34,7 @@ $PAGE->set_url(new moodle_url('/local/hermesagent/chat.php', [
 $PAGE->set_context(context_system::instance());
 $PAGE->set_title(get_string('pluginname', 'local_hermesagent'));
 $PAGE->set_heading(get_string('pluginname', 'local_hermesagent'));
-$PAGE->requires->css(new moodle_url('/local/hermesagent/styles/chat.css', ['v' => '20260708d']));
+$PAGE->requires->css(new moodle_url('/local/hermesagent/styles/chat.css', ['v' => '20260708f']));
 // Load the chat AMD module (proper Moodle way)
 $PAGE->requires->js_call_amd('local_hermesagent/chat', 'init');
 
@@ -95,7 +95,22 @@ echo html_writer::tag('button', '+', [
     'class' => 'hermes-new-conv-btn',
     'title' => get_string('newconversation', 'local_hermesagent'),
 ]);
-echo html_writer::tag('h3', get_string('conversations', 'local_hermesagent'));
+echo html_writer::start_div('hermes-search-container');
+echo html_writer::empty_tag('input', [
+    'type' => 'text',
+    'id' => 'hermes-conv-search',
+    'class' => 'hermes-search-input form-control',
+    'placeholder' => 'Search conversations…',
+    'autocomplete' => 'off',
+]);
+echo html_writer::tag('button', '✕', [
+    'id' => 'hermes-search-clear',
+    'class' => 'hermes-search-clear',
+    'title' => 'Clear search',
+    'type' => 'button',
+    'style' => 'display:none;',
+]);
+echo html_writer::end_div();
 echo html_writer::tag('button', '◀', [
     'id' => 'hermes-sidebar-collapse',
     'class' => 'hermes-sidebar-collapse-btn',
@@ -119,26 +134,6 @@ echo html_writer::tag('button', '✕', [
     'id' => 'hermes-bulk-cancel',
     'class' => 'btn btn-link btn-sm hermes-bulk-cancel',
     'title' => 'Cancel selection',
-]);
-echo html_writer::end_div();
-
-echo html_writer::empty_tag('hr');
-
-// Search box
-echo html_writer::start_div('hermes-search-container');
-echo html_writer::empty_tag('input', [
-    'type' => 'text',
-    'id' => 'hermes-conv-search',
-    'class' => 'hermes-search-input form-control',
-    'placeholder' => 'Search conversations…',
-    'autocomplete' => 'off',
-]);
-echo html_writer::tag('button', '✕', [
-    'id' => 'hermes-search-clear',
-    'class' => 'hermes-search-clear',
-    'title' => 'Clear search',
-    'type' => 'button',
-    'style' => 'display:none;',
 ]);
 echo html_writer::end_div();
 
