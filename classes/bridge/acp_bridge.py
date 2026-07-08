@@ -685,10 +685,18 @@ async def session_permission(request: Request):
     if not acp.proc or acp.proc.poll() is not None:
         return {"status": "error", "message": "ACP process not running"}
 
+    # ACP expects RequestPermissionResponse with outcome field:
+    # - Approved: {"outcome": {"outcome": "selected", "optionId": "allow_once"}}
+    # - Rejected: {"outcome": {"outcome": "cancelled"}}
+    if approved:
+        outcome = {"outcome": "selected", "optionId": "allow_once"}
+    else:
+        outcome = {"outcome": "cancelled"}
+
     response = {
         "jsonrpc": "2.0",
         "id": permission_id,
-        "result": {"status": "accepted" if approved else "rejected"},
+        "result": {"outcome": outcome},
     }
     acp.proc.stdin.write(json.dumps(response) + "\n")
     acp.proc.stdin.flush()

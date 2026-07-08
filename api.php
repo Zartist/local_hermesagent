@@ -47,7 +47,7 @@ $PAGE->set_context(context_system::instance());
 // Abort is a lightweight signal, no sesskey needed.
 // Status is read-only health check, no sesskey needed.
 $action = required_param('action', PARAM_ALPHA);
-if ($action !== 'stream' && $action !== 'abort' && $action !== 'status') {
+if ($action !== 'stream' && $action !== 'abort' && $action !== 'status' && $action !== 'permission_response') {
     require_sesskey();
 }
 
@@ -421,11 +421,14 @@ function api_tool_response(): void {
  * Forward permission response (approve/reject) to the ACP bridge
  */
 function api_permission_response(): void {
+    _hermes_log('api_permission_response: START');
     $permission_id = required_param('permission_id', PARAM_INT);
     $approved = required_param('approved', PARAM_BOOL);
+    _hermes_log("api_permission_response: permission_id=$permission_id approved=" . ($approved ? '1' : '0'));
 
     $bridge_port = local_hermesagent_get_bridge_port();
     $bridge_url = "http://127.0.0.1:$bridge_port/session/permission";
+    _hermes_log("api_permission_response: calling bridge at $bridge_url");
 
     $ch = curl_init($bridge_url);
     curl_setopt_array($ch, [
@@ -440,7 +443,9 @@ function api_permission_response(): void {
     ]);
     $resp = curl_exec($ch);
     $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
     curl_close($ch);
+    _hermes_log("api_permission_response: bridge response http=$http err=$err resp=$resp");
 
     if ($http !== 200) {
         send_json_response(['status' => 'error', 'message' => 'Bridge error']);
