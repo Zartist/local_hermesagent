@@ -362,8 +362,8 @@
   display: inline-block;
 }
 
-/* Responsive — mobile phones */
-@media (max-width: 768px) {
+/* Responsive — mobile phones (portrait and small screens) */
+@media (max-width: 600px) {
   .hermes-chat-container {
     flex-direction: column;
     height: calc(100vh - 140px);
@@ -373,7 +373,7 @@
     border-right: none;
   }
 
-  /* Sidebar collapses to a thin strip with a toggle */
+  /* Sidebar collapses to a tappable header on mobile */
   .hermes-sidebar {
     width: 100%;
     min-width: 0;
@@ -384,15 +384,23 @@
     border-bottom: 1px solid rgba(255,255,255,0.1);
   }
   .hermes-sidebar.hermes-sidebar-open {
-    max-height: 200px;
+    max-height: 220px;
   }
   .hermes-sidebar-header {
     padding: 10px 12px;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   .hermes-sidebar-header h3 {
     font-size: 13px;
     margin: 0;
+  }
+  .hermes-sidebar-header::after {
+    content: "\25BC";
+    font-size: 10px;
+    color: #7f849c;
   }
   .hermes-sidebar-header hr {
     display: none;
@@ -486,20 +494,24 @@
   }
 }
 
-/* Responsive — foldable phones (unfolded/wide) */
-@media (min-width: 769px) and (max-width: 1024px) {
+/* Responsive — foldable phones and small tablets (601-1024px) */
+@media (min-width: 601px) and (max-width: 1024px) {
   .hermes-chat-container {
     height: calc(100vh - 160px);
   }
   .hermes-sidebar {
-    width: 200px;
-    min-width: 200px;
+    width: 180px;
+    min-width: 180px;
   }
   .hermes-message {
     max-width: 85%;
   }
   .hermes-input-container {
     max-width: 100%;
+  }
+  .hermes-conv-item {
+    font-size: 12px;
+    padding: 8px 10px;
   }
 }
 
