@@ -90,16 +90,16 @@ echo html_writer::start_div('hermes-chat-container');
 echo html_writer::start_div('hermes-sidebar');
 echo html_writer::start_div('hermes-sidebar-header');
 echo html_writer::start_div('hermes-sidebar-title-row');
-echo html_writer::tag('button', '◀', [
-    'id' => 'hermes-sidebar-collapse',
-    'class' => 'hermes-sidebar-collapse-btn',
-    'title' => 'Collapse sidebar',
-]);
-echo html_writer::tag('h3', get_string('conversations', 'local_hermesagent'));
 echo html_writer::tag('button', '+', [
     'id' => 'hermes-new-conv',
     'class' => 'hermes-new-conv-btn',
     'title' => get_string('newconversation', 'local_hermesagent'),
+]);
+echo html_writer::tag('h3', get_string('conversations', 'local_hermesagent'));
+echo html_writer::tag('button', '◀', [
+    'id' => 'hermes-sidebar-collapse',
+    'class' => 'hermes-sidebar-collapse-btn',
+    'title' => 'Collapse sidebar',
 ]);
 echo html_writer::end_div('hermes-sidebar-title-row');
 
