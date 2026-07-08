@@ -27,17 +27,47 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Get previous tag
-          PREV_TAG=$(git tag --sort=-version:refname | head -n1)
+          # Extract version from the tag (e.g. v0.4.0 → 0.4.0)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Version: $VERSION"
+
+          # Get previous tag (skip the current tag at position 1)
+          PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+          echo "Previous tag: ${PREV_TAG:-none}"
+
+          # Try to extract the matching section from CHANGES.md
+          # Format: ## [0.4.0] — 2026-07-08
+          if [ -f CHANGES.md ]; then
+            # Extract from the version heading to the next --- separator
+            SECTION=$(awk -v ver="$VERSION" '
+              $0 ~ "^## \\[" ver "\\]" { found=1; next }
+              found && /^---/ { exit }
+              found { print }
+            ' CHANGES.md | sed '/^$/N;/^\n$/D')
+
+            if [ -n "$SECTION" ]; then
+              {
+                echo "## Changelog"
+                echo ""
+                echo "$SECTION"
+                echo ""
+              } > CHANGELOG_TMP.md
+            fi
+          fi
+
+          # Append git log of commits since previous tag
           if [ -n "$PREV_TAG" ]; then
-            echo "### Changes since $PREV_TAG" > CHANGELOG_TMP.md
             echo "" >> CHANGELOG_TMP.md
-            git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s (%h)" >> CHANGELOG_TMP.md
+            echo "### Commits since ${PREV_TAG}" >> CHANGELOG_TMP.md
+            echo "" >> CHANGELOG_TMP.md
+            git log "${PREV_TAG}..HEAD" --oneline --pretty=format:"- %s (%h)" >> CHANGELOG_TMP.md
           else
-            echo "### Initial release" > CHANGELOG_TMP.md
+            echo "### Initial release" >> CHANGELOG_TMP.md
             echo "" >> CHANGELOG_TMP.md
             git log --oneline --pretty=format:"- %s (%h)" >> CHANGELOG_TMP.md
           fi
+
+          echo "--- Generated changelog ---"
           cat CHANGELOG_TMP.md
 
       - name: Create GitHub Release
